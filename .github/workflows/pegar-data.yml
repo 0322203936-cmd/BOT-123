@@ -33,11 +33,13 @@ jobs:
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
         run: python bot/pegar_data.py
 
-      - name: Guardar capturas
+      - name: Guardar capturas y reporte
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: capturas-pegar-data-${{ github.run_number }}
-          path: artifacts/capturas/*.png
+          path: |
+            artifacts/capturas/*.png
+            artifacts/reportes/*
           if-no-files-found: warn
           retention-days: 7

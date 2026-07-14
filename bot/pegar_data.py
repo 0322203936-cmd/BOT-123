@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright
 
 POSCO_URL = "http://3.132.9.174/Posco/"
 CAPTURES_DIR = Path("artifacts/capturas")
+REPORTS_DIR = Path("artifacts/reportes")
 
 
 def capture(page, name: str) -> None:
@@ -135,6 +136,34 @@ def click_search(page) -> None:
     raise RuntimeError("No se encontró el control Buscar.")
 
 
+def click_visible_text(page, text: str) -> None:
+    candidates = page.get_by_text(text, exact=True)
+    for index in range(candidates.count()):
+        element = candidates.nth(index)
+        if element.is_visible():
+            element.click(timeout=10_000)
+            return
+    raise RuntimeError(f"No se encontró el control visible {text}.")
+
+
+def export_color_filter(page) -> Path:
+    """Descarga el reporte del filtro actual sin modificar ninguna orden."""
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    click_visible_text(page, "Exportar")
+    page.wait_for_timeout(500)
+    capture(page, "06_menu_exportar.png")
+
+    with page.expect_download(timeout=30_000) as download_info:
+        click_visible_text(page, "Exportar Color filtro")
+
+    download = download_info.value
+    filename = Path(download.suggested_filename).name or "exportar_color_filtro.xlsx"
+    destination = REPORTS_DIR / filename
+    download.save_as(str(destination))
+    print(f"Reporte descargado: {destination}")
+    return destination
+
+
 def run() -> None:
     user = required_secret("POSCO_USER")
     password = required_secret("POSCO_PASSWORD")
@@ -184,6 +213,11 @@ def run() -> None:
             print("Esperando 6 segundos para que se aplique el filtro ACTIVO...")
             page.wait_for_timeout(6_000)
             capture(page, "05_status_activo.png")
+
+            print("Abriendo Exportar y descargando Exportar Color filtro...")
+            export_color_filter(page)
+            page.wait_for_timeout(5_000)
+            capture(page, "07_exportacion_completada.png")
 
             print(f"Paso exploratorio completado. URL final: {page.url}")
         except Exception:
