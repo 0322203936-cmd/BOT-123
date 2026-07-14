@@ -1,5 +1,7 @@
 import os
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -73,6 +75,50 @@ def select_active_status(page) -> None:
     raise RuntimeError("No se encontró el filtro de estatus con la opción ACTIVO.")
 
 
+def calculate_date_range(today: date | None = None) -> tuple[date, date]:
+    """Devuelve el viernes anterior y el viernes tres semanas después."""
+    current_date = today or datetime.now(ZoneInfo("America/Tijuana")).date()
+    days_since_friday = (current_date.weekday() - 4) % 7
+    if days_since_friday == 0:
+        days_since_friday = 7
+    previous_friday = current_date - timedelta(days=days_since_friday)
+    return previous_friday, previous_friday + timedelta(weeks=3)
+
+
+def find_date_input(page, label: str, fallback_index: int):
+    group_input = page.locator(f'.input-group:has-text("{label}") input')
+    if group_input.count() > 0:
+        return group_input.first
+
+    label_node = page.get_by_text(label, exact=True)
+    if label_node.count() > 0:
+        sibling_input = label_node.first.locator("xpath=..").locator("input")
+        if sibling_input.count() > 0:
+            return sibling_input.first
+
+    date_inputs = page.locator('input[type="date"]')
+    if date_inputs.count() > fallback_index:
+        return date_inputs.nth(fallback_index)
+    raise RuntimeError(f"No se encontró el campo {label}.")
+
+
+def fill_date_input(locator, value: date) -> None:
+    input_type = (locator.get_attribute("type") or "text").lower()
+    formatted = value.isoformat() if input_type == "date" else value.strftime("%m/%d/%Y")
+    locator.fill(formatted)
+    locator.press("Tab")
+
+
+def set_load_date_range(page) -> tuple[date, date]:
+    start_date, end_date = calculate_date_range()
+    menor = find_date_input(page, "Load Date Menor", 0)
+    mayor = find_date_input(page, "Load Date Mayor", 1)
+    fill_date_input(menor, start_date)
+    fill_date_input(mayor, end_date)
+    print(f"Rango configurado: {start_date.isoformat()} -> {end_date.isoformat()}")
+    return start_date, end_date
+
+
 def run() -> None:
     user = required_secret("POSCO_USER")
     password = required_secret("POSCO_PASSWORD")
@@ -108,9 +154,13 @@ def run() -> None:
                 page.wait_for_url("**/#/list-orden-detalle", timeout=30_000)
             except PlaywrightTimeoutError:
                 print(f"La URL no cambió al patrón esperado. URL actual: {page.url}")
-            print("Esperando 30 segundos para que cargue la información de Órdenes...")
+            page.wait_for_timeout(3_000)
+            print("Configurando Load Date Menor y Load Date Mayor...")
+            set_load_date_range(page)
+            page.get_by_role("button", name="Buscar", exact=True).click(timeout=10_000)
+            print("Esperando 30 segundos para que cargue el rango de fechas...")
             page.wait_for_timeout(30_000)
-            capture(page, "04_ordenes_final.png")
+            capture(page, "04_rango_fechas.png")
 
             print("Cambiando el filtro de estatus a ACTIVO...")
             select_active_status(page)
