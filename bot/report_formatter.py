@@ -14,7 +14,7 @@ def copy_cell(source, destination) -> None:
 
 
 def format_downloaded_report(source_path: Path) -> Path:
-    """Mueve N a R, conserva S y activa filtros en toda la tabla."""
+    """Reordena columnas, ajusta txr_orden y activa filtros."""
     workbook = load_workbook(source_path)
     worksheet = workbook.active
 
@@ -30,8 +30,14 @@ def format_downloaded_report(source_path: Path) -> Path:
             f"La columna N no es {expected_header}; se encontró {actual_header or 'vacía'}."
         )
 
-    # La macro original se grabó para un reporte de 18 columnas. El reporte actual
-    # incluye Horas en S, por lo que se conserva S y solo se reordena el bloque N:R.
+    hours_header = str(worksheet.cell(row=1, column=19).value or "").strip()
+    if hours_header != "Horas":
+        raise RuntimeError(
+            f"La columna S no es Horas; se encontró {hours_header or 'vacía'}."
+        )
+
+    # La macro original mueve N al final del reporte. En la exportación actual,
+    # primero se reordena N:R y después se elimina la columna adicional Horas.
     for row in range(1, worksheet.max_row + 1):
         original_cells = [
             copy(worksheet.cell(row=row, column=column))
@@ -41,11 +47,36 @@ def format_downloaded_report(source_path: Path) -> Path:
         for column, source_cell in zip(range(14, 19), reordered_cells):
             copy_cell(source_cell, worksheet.cell(row=row, column=column))
 
+    changed_veronica = 0
+    changed_snapdragon = 0
+    for row in range(2, worksheet.max_row + 1):
+        flower = str(worksheet.cell(row=row, column=5).value or "").strip().upper()
+        txr_cell = worksheet.cell(row=row, column=18)
+
+        if flower.startswith("VERONICA"):
+            if txr_cell.value != 10:
+                txr_cell.value = 10
+                changed_veronica += 1
+        elif flower.startswith("SNAPDRAGON"):
+            try:
+                txr_value = float(str(txr_cell.value).strip())
+            except (TypeError, ValueError):
+                txr_value = None
+            if txr_value not in {5.0, 10.0}:
+                txr_cell.value = 10
+                changed_snapdragon += 1
+
+    worksheet.delete_cols(19, 1)
+
     last_column = get_column_letter(worksheet.max_column)
     worksheet.auto_filter.ref = f"A1:{last_column}{worksheet.max_row}"
 
     destination = source_path.with_name(f"{source_path.stem}_formateado.xlsx")
     workbook.save(destination)
     workbook.close()
-    print(f"Reporte formateado sin cambiar valores: {destination}")
+    print(
+        "Ajustes txr_orden: "
+        f"Veronica={changed_veronica}, Snapdragon={changed_snapdragon}"
+    )
+    print(f"Reporte formateado: {destination}")
     return destination
