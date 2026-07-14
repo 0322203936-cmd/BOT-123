@@ -96,8 +96,8 @@ def run() -> None:
                 page.wait_for_url("**/#/list-orden-detalle", timeout=30_000)
             except PlaywrightTimeoutError:
                 print(f"La URL no cambió al patrón esperado. URL actual: {page.url}")
-            print("Esperando 15 segundos para que cargue la información de Órdenes...")
-            page.wait_for_timeout(15_000)
+            print("Esperando 30 segundos para que cargue la información de Órdenes...")
+            page.wait_for_timeout(30_000)
             capture(page, "04_ordenes_final.png")
 
             print(f"Paso exploratorio completado. URL final: {page.url}")
