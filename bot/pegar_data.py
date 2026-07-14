@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+from report_formatter import format_downloaded_report
 
 
 POSCO_URL = "http://3.132.9.174/Posco/"
@@ -215,7 +216,8 @@ def run() -> None:
             capture(page, "05_status_activo.png")
 
             print("Abriendo Exportar y descargando Exportar Color filtro...")
-            export_color_filter(page)
+            downloaded_report = export_color_filter(page)
+            format_downloaded_report(downloaded_report)
             page.wait_for_timeout(5_000)
             capture(page, "07_exportacion_completada.png")
 
