@@ -181,8 +181,8 @@ def run() -> None:
 
             print("Cambiando el filtro de estatus a ACTIVO...")
             select_active_status(page)
-            print("Esperando 15 segundos para que se aplique el filtro ACTIVO...")
-            page.wait_for_timeout(15_000)
+            print("Esperando 6 segundos para que se aplique el filtro ACTIVO...")
+            page.wait_for_timeout(6_000)
             capture(page, "05_status_activo.png")
 
             print(f"Paso exploratorio completado. URL final: {page.url}")
