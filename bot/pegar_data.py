@@ -175,8 +175,8 @@ def run() -> None:
             set_load_date_range(page)
             page.wait_for_timeout(1_000)
             click_search(page)
-            print("Esperando 30 segundos para que cargue el rango de fechas...")
-            page.wait_for_timeout(30_000)
+            print("Esperando 2 minutos para que cargue el rango de fechas...")
+            page.wait_for_timeout(120_000)
             capture(page, "04_rango_fechas.png")
 
             print("Cambiando el filtro de estatus a ACTIVO...")
