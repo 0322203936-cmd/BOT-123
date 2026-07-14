@@ -29,31 +29,35 @@ def open_orders_menu(page) -> None:
     candidates = [
         page.get_by_role("link", name="Ordenes", exact=True),
         page.get_by_role("button", name="Ordenes", exact=True),
-        page.locator('a.dropdown-toggle:has-text("Ordenes")'),
-        page.locator('a:has-text("Ordenes")'),
+        page.locator('[ngbdropdowntoggle]:has-text("Ordenes")'),
+        page.get_by_text("Ordenes", exact=True),
     ]
 
     for candidate in candidates:
-        if candidate.count() > 0:
-            candidate.first.click(timeout=10_000)
-            return
+        for index in range(candidate.count()):
+            element = candidate.nth(index)
+            if element.is_visible():
+                element.click(timeout=10_000)
+                return
     raise RuntimeError("No se encontró el menú superior Órdenes.")
 
 
 def select_orders_option(page) -> None:
     """Selecciona la primera opción Órdenes dentro del menú desplegado."""
-    visible_menu = page.locator(".dropdown-menu:visible")
-    if visible_menu.count() > 0:
-        option = visible_menu.get_by_text("Ordenes", exact=True)
-        if option.count() > 0:
-            option.first.click(timeout=10_000)
+    exact_route = page.locator('a[href="#/list-orden-detalle"]')
+    for index in range(exact_route.count()):
+        option = exact_route.nth(index)
+        if option.is_visible():
+            option.click(timeout=10_000)
             return
 
     # Respaldo para implementaciones que no usan la clase Bootstrap dropdown-menu.
     options = page.get_by_text("Ordenes", exact=True)
-    if options.count() >= 2:
-        options.nth(1).click(timeout=10_000)
-        return
+    for index in range(options.count()):
+        option = options.nth(index)
+        if option.is_visible() and option.get_attribute("href") == "#/list-orden-detalle":
+            option.click(timeout=10_000)
+            return
     raise RuntimeError("No se encontró la opción Órdenes dentro del menú.")
 
 
@@ -89,7 +93,7 @@ def run() -> None:
             print("Seleccionando Órdenes...")
             select_orders_option(page)
             try:
-                page.wait_for_url("**/#/revisar-ordenes", timeout=30_000)
+                page.wait_for_url("**/#/list-orden-detalle", timeout=30_000)
             except PlaywrightTimeoutError:
                 print(f"La URL no cambió al patrón esperado. URL actual: {page.url}")
             page.wait_for_timeout(3_000)
