@@ -119,6 +119,22 @@ def set_load_date_range(page) -> tuple[date, date]:
     return start_date, end_date
 
 
+def click_search(page) -> None:
+    """Presiona Buscar aunque Posco no exponga el control con rol button."""
+    candidates = [
+        page.locator('button:has-text("Buscar"), a:has-text("Buscar")'),
+        page.locator('[class*="btn"]:has-text("Buscar")'),
+        page.get_by_text("Buscar", exact=True),
+    ]
+    for candidate in candidates:
+        for index in range(candidate.count()):
+            element = candidate.nth(index)
+            if element.is_visible():
+                element.click(timeout=10_000)
+                return
+    raise RuntimeError("No se encontró el control Buscar.")
+
+
 def run() -> None:
     user = required_secret("POSCO_USER")
     password = required_secret("POSCO_PASSWORD")
@@ -157,7 +173,8 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             print("Configurando Load Date Menor y Load Date Mayor...")
             set_load_date_range(page)
-            page.get_by_role("button", name="Buscar", exact=True).click(timeout=10_000)
+            page.wait_for_timeout(1_000)
+            click_search(page)
             print("Esperando 30 segundos para que cargue el rango de fechas...")
             page.wait_for_timeout(30_000)
             capture(page, "04_rango_fechas.png")
