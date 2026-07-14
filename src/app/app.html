@@ -1,0 +1,99 @@
+<main class="shell">
+  @if (loading()) {
+    <section class="center-state" aria-live="polite">
+      <div class="loader"></div>
+      <p>Conectando con los bots…</p>
+    </section>
+  } @else if (authRequired() && !authenticated()) {
+    <section class="login-card">
+      <span class="eyebrow">ACCESO PROTEGIDO</span>
+      <h1>Panel de automatizaciones</h1>
+      <p>Ingresa la contraseña configurada en Render para continuar.</p>
+      <form (ngSubmit)="connect()">
+        <label for="password">Contraseña</label>
+        <input id="password" name="password" type="password" [(ngModel)]="password" autocomplete="current-password" required />
+        <button type="submit">Entrar al panel</button>
+      </form>
+      @if (error()) { <p class="alert error" role="alert">{{ error() }}</p> }
+    </section>
+  } @else {
+    <section class="hero">
+      <h1>Atajos Centro Floricultor</h1>
+    </section>
+
+    @if (!configured()) {
+      <div class="alert error" role="alert">Falta configurar <code>GITHUB_TOKEN</code> en el servidor.</div>
+    }
+    @if (message()) { <div class="alert success-message" role="status">{{ message() }}</div> }
+    @if (error()) { <div class="alert error" role="alert">{{ error() }}</div> }
+
+    <section class="workflow-grid" aria-label="Automatizaciones disponibles">
+      @for (workflow of workflows(); track workflow.key; let index = $index) {
+        <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'">
+          <div class="card-head">
+            <div class="bot-icon" aria-hidden="true">
+              @if (workflow.key === 'galleria') {
+                <svg viewBox="0 0 24 24"><path d="M4 19h16M6 16V8l6-4 6 4v8M9 16v-5h6v5" /></svg>
+              } @else if (workflow.key === 'cancelaciones') {
+                <svg viewBox="0 0 24 24"><path d="M7 3h10v3H7zM5 5v16h14V5M8 10h8M8 14h6M8 18h4" /></svg>
+              } @else {
+                <svg viewBox="0 0 24 24"><path d="M8 4h8v3H8zM6 6v15h12V6M9 11h6M9 15h6M9 19h4" /></svg>
+              }
+            </div>
+            <div class="card-actions">
+              <span class="status" [ngClass]="statusClass(workflow.run)">
+                <i></i>{{ statusLabel(workflow.run) }}
+              </span>
+              @if (workflow.run?.url) {
+                <a class="github-link" [href]="workflow.run?.url" target="_blank" rel="noopener" aria-label="Abrir ejecución en GitHub">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 13v6H5V6h6" /></svg>
+                </a>
+              }
+            </div>
+          </div>
+
+          <div class="card-copy">
+            <h2>{{ workflow.name }}</h2>
+          </div>
+
+          <div class="quick-facts">
+            <span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v3M18 3v3M4 9h16M5 5h14v15H5z" /></svg>
+              @if (workflow.key === 'galleria') { Diario · 3 horarios }
+              @else if (workflow.key === 'cancelaciones') { Lun–Sáb · 3 horarios }
+              @else { Ejecución manual }
+            </span>
+            @if (isActive(workflow.run)) {
+              <span class="elapsed-time">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                Tiempo transcurrido · <strong>{{ elapsedLabel(workflow.run) }}</strong>
+              </span>
+            } @else {
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
+                {{ formatDate(workflow.run?.updatedAt) }}
+              </span>
+            }
+          </div>
+
+          <button
+            class="run-button"
+            type="button"
+            [disabled]="running() !== null || isActive(workflow.run) || !configured()"
+            (click)="execute(workflow)"
+          >
+            @if (running() === workflow.key) {
+              <span class="button-loader"></span> Enviando…
+            } @else if (isActive(workflow.run)) {
+              <span class="button-loader"></span> En ejecución · {{ elapsedLabel(workflow.run) }}
+            } @else {
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z" /></svg>
+              Ejecutar
+            }
+          </button>
+        </article>
+      }
+    </section>
+
+  }
+</main>

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: atajos-globales
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: GITHUB_OWNER
+        value: 0322203936-cmd
+      - key: GALLERIA_GITHUB_REPO
+        value: BOT-GALLERIA
+      - key: PEGAR_DATA_GITHUB_REPO
+        value: BOT-123
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
