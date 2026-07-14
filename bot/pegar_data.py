@@ -61,6 +61,18 @@ def select_orders_option(page) -> None:
     raise RuntimeError("No se encontró la opción Órdenes dentro del menú.")
 
 
+def select_active_status(page) -> None:
+    """Encuentra el filtro de estatus por sus opciones y selecciona ACTIVO."""
+    selects = page.locator("select")
+    for index in range(selects.count()):
+        select = selects.nth(index)
+        options = [text.strip() for text in select.locator("option").all_text_contents()]
+        if "ACTIVO" in options:
+            select.select_option(label="ACTIVO")
+            return
+    raise RuntimeError("No se encontró el filtro de estatus con la opción ACTIVO.")
+
+
 def run() -> None:
     user = required_secret("POSCO_USER")
     password = required_secret("POSCO_PASSWORD")
@@ -99,6 +111,12 @@ def run() -> None:
             print("Esperando 30 segundos para que cargue la información de Órdenes...")
             page.wait_for_timeout(30_000)
             capture(page, "04_ordenes_final.png")
+
+            print("Cambiando el filtro de estatus a ACTIVO...")
+            select_active_status(page)
+            print("Esperando 15 segundos para que se aplique el filtro ACTIVO...")
+            page.wait_for_timeout(15_000)
+            capture(page, "05_status_activo.png")
 
             print(f"Paso exploratorio completado. URL final: {page.url}")
         except Exception:
