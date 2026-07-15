@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ""
+      restore_version_id:
+        description: Versión que se restaurará en SharePoint
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -34,6 +39,7 @@ jobs:
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
           SHAREPOINT_VERSION_ID: ${{ inputs.version_id }}
+          SHAREPOINT_RESTORE_VERSION_ID: ${{ inputs.restore_version_id }}
         run: python bot/audit_sharepoint_versions.py
 
       - name: Guardar versión para inspección
@@ -42,4 +48,12 @@ jobs:
         with:
           name: sharepoint-version-${{ inputs.version_id }}
           path: artifacts/recovery/*.xlsm
+          retention-days: 2
+
+      - name: Guardar libro restaurado
+        if: ${{ inputs.restore_version_id != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharepoint-restaurado-${{ inputs.restore_version_id }}
+          path: artifacts/recovery/Reunion_restaurado.xlsm
           retention-days: 2

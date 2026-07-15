@@ -44,6 +44,26 @@ def run() -> None:
         destination.write_bytes(content.content)
         print(f"VERSION_DESCARGADA id={version_id} ruta={destination}")
 
+    restore_version_id = os.environ.get("SHAREPOINT_RESTORE_VERSION_ID", "").strip()
+    if restore_version_id:
+        restored = requests.post(
+            f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/versions/"
+            f"{restore_version_id}/restoreVersion",
+            headers=graph_headers(token),
+            timeout=60,
+        )
+        restored.raise_for_status()
+        current = requests.get(
+            f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content",
+            headers=graph_headers(token),
+            timeout=180,
+        )
+        current.raise_for_status()
+        destination = Path("artifacts/recovery") / "Reunion_restaurado.xlsm"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(current.content)
+        print(f"VERSION_RESTAURADA id={restore_version_id} ruta={destination}")
+
 
 if __name__ == "__main__":
     run()
