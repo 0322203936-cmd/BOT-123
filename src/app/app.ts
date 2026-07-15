@@ -4,7 +4,7 @@ import { Component, computed, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
@@ -120,6 +120,14 @@ export class App implements OnInit, OnDestroy {
 
   protected async execute(workflow: WorkflowStatus): Promise<void> {
     if (this.running() || this.isActive(workflow.run)) return;
+    if (
+      workflow.key === 'reunion' &&
+      !window.confirm(
+        'Se avanzará la fecha un día y se recorrerán todas las columnas Cor. ¿Deseas continuar?',
+      )
+    ) {
+      return;
+    }
 
     this.running.set(workflow.key);
     this.error.set('');

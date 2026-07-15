@@ -25,7 +25,7 @@
 
 .workflow-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -56,6 +56,7 @@
 .workflow-card.secondary::before { background: linear-gradient(90deg, #253c4b, #527286); }
 .workflow-card.tertiary::before { background: linear-gradient(90deg, #743b30, #a66552); }
 .workflow-card.quaternary::before { background: linear-gradient(90deg, #51477c, #7d70ad); }
+.workflow-card.quinary::before { background: linear-gradient(90deg, #946511, #c58c28); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 
@@ -73,6 +74,7 @@
 .secondary .bot-icon { color: #fff; background: linear-gradient(145deg, #334f60, #203643); box-shadow: 0 7px 16px rgba(32, 54, 67, .2); }
 .tertiary .bot-icon { color: #fff; background: linear-gradient(145deg, #8a493b, #613027); box-shadow: 0 7px 16px rgba(97, 48, 39, .2); }
 .quaternary .bot-icon { color: #fff; background: linear-gradient(145deg, #665a91, #443b6b); box-shadow: 0 7px 16px rgba(68, 59, 107, .2); }
+.quinary .bot-icon { color: #fff; background: linear-gradient(145deg, #b27a18, #80530c); box-shadow: 0 7px 16px rgba(128, 83, 12, .2); }
 .bot-icon svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .card-actions { display: flex; align-items: center; gap: 7px; }
@@ -140,10 +142,12 @@
 .secondary .run-button { background: linear-gradient(135deg, #334f60, #203643); }
 .tertiary .run-button { background: linear-gradient(135deg, #8a493b, #613027); }
 .quaternary .run-button { background: linear-gradient(135deg, #665a91, #443b6b); }
+.quinary .run-button { background: linear-gradient(135deg, #b27a18, #80530c); }
 .run-button:hover:not(:disabled) { background: #0f553c; transform: translateY(-1px); }
 .secondary .run-button:hover:not(:disabled) { background: #172c38; }
 .tertiary .run-button:hover:not(:disabled) { background: #51251e; }
 .quaternary .run-button:hover:not(:disabled) { background: #352d58; }
+.quinary .run-button:hover:not(:disabled) { background: #684208; }
 .run-button:disabled { cursor: not-allowed; opacity: 0.52; }
 .run-button svg { width: 16px; fill: currentColor; }
 

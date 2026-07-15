@@ -49,6 +49,15 @@ const workflows = {
     description: 'Descarga Inventario General de Posco y actualiza cuatro columnas en SharePoint.',
     schedule: 'Ejecución manual',
   },
+  reunion: {
+    owner,
+    repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'procesar-reunion.yml',
+    name: 'Procesar Reunión',
+    description: 'Avanza la fecha y recorre los campos Cor de la hoja Reunion.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();
