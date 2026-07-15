@@ -1,0 +1,37 @@
+name: Validar copia Excel Online
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install requests openpyxl lxml
+
+      - name: Abrir copia con Microsoft Office
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+        run: python bot/validate_sharepoint_test_copy.py
+
+      - name: Guardar validación
+        uses: actions/upload-artifact@v4
+        with:
+          name: validacion-excel-online
+          path: artifacts/test-copy-validation/*
+          retention-days: 2
