@@ -13,15 +13,6 @@
   margin: 38px 0 28px;
 }
 
-.eyebrow {
-  display: block;
-  margin-bottom: 18px;
-  color: #39705d;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 2.3px;
-}
-
 .hero h1, .login-card h1 {
   margin: 0;
   color: #17211d;
@@ -105,19 +96,6 @@
 .status.active { color: #9a642a; background: #fbefdf; }
 .status.failure { color: #a63e3e; background: #fbeaea; }
 .status.active i { animation: pulse 1.2s infinite; }
-
-.github-link {
-  display: grid;
-  place-items: center;
-  width: 29px;
-  height: 29px;
-  color: #7c8882;
-  border: 1px solid #dfe5e2;
-  border-radius: 8px;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
-}
-.github-link:hover { color: #176b4d; border-color: #bfd2c9; background: #f1f7f4; }
-.github-link svg { width: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .card-copy { margin: 25px 0 19px; }
 .card-copy h2 { margin: 0; color: #17211d; font-size: 19px; font-weight: 750; letter-spacing: -.45px; }
