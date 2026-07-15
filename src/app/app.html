@@ -29,15 +29,17 @@
 
     <section class="workflow-grid" aria-label="Automatizaciones disponibles">
       @for (workflow of workflows(); track workflow.key; let index = $index) {
-        <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'">
+        <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'" [class.quaternary]="workflow.key === 'inventario'">
           <div class="card-head">
             <div class="bot-icon" aria-hidden="true">
               @if (workflow.key === 'galleria') {
                 <svg viewBox="0 0 24 24"><path d="M4 19h16M6 16V8l6-4 6 4v8M9 16v-5h6v5" /></svg>
               } @else if (workflow.key === 'cancelaciones') {
                 <svg viewBox="0 0 24 24"><path d="M7 3h10v3H7zM5 5v16h14V5M8 10h8M8 14h6M8 18h4" /></svg>
-              } @else {
+              } @else if (workflow.key === 'pegarData') {
                 <svg viewBox="0 0 24 24"><path d="M8 4h8v3H8zM6 6v15h12V6M9 11h6M9 15h6M9 19h4" /></svg>
+              } @else {
+                <svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM7 4h10v3M8 11h3M13 11h3M8 15h3M13 15h3" /></svg>
               }
             </div>
             <div class="card-actions">

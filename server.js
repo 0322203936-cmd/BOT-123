@@ -40,6 +40,15 @@ const workflows = {
     description: 'Descarga datos desde Posco y actualiza el archivo de SharePoint.',
     schedule: 'Ejecución manual',
   },
+  inventario: {
+    owner,
+    repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'inventario.yml',
+    name: 'Inventario',
+    description: 'Descarga Inventario General de Posco y actualiza cuatro columnas en SharePoint.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();
