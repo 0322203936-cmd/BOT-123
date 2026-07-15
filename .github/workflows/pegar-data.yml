@@ -2,6 +2,16 @@ name: Bot Pegar Data - Exploracion Posco
 
 on:
   workflow_dispatch:
+    inputs:
+      actualizar_sharepoint:
+        description: Sobrescribir el archivo de SharePoint
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: pegar-data-sharepoint
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -31,6 +41,10 @@ jobs:
         env:
           POSCO_USER: ${{ secrets.POSCO_USER }}
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_UPLOAD: ${{ inputs.actualizar_sharepoint }}
         run: python bot/pegar_data.py
 
       - name: Guardar capturas y reporte
@@ -41,5 +55,6 @@ jobs:
           path: |
             artifacts/capturas/*.png
             artifacts/reportes/*
+            artifacts/sharepoint/*_actualizado.xlsm
           if-no-files-found: warn
           retention-days: 7

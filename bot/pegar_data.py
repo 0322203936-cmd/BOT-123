@@ -6,11 +6,19 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 from report_formatter import format_downloaded_report
+from sharepoint_sync import sync_report_to_sharepoint
 
 
 POSCO_URL = "http://3.132.9.174/Posco/"
 CAPTURES_DIR = Path("artifacts/capturas")
 REPORTS_DIR = Path("artifacts/reportes")
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "si", "sí"}
 
 
 def capture(page, name: str) -> None:
@@ -217,7 +225,12 @@ def run() -> None:
 
             print("Abriendo Exportar y descargando Exportar Color filtro...")
             downloaded_report = export_color_filter(page)
-            format_downloaded_report(downloaded_report)
+            formatted_report = format_downloaded_report(downloaded_report)
+            print("Preparando reemplazo A:R en la hoja PegarData...")
+            sync_report_to_sharepoint(
+                formatted_report,
+                upload=env_flag("SHAREPOINT_UPLOAD", default=True),
+            )
             page.wait_for_timeout(5_000)
             capture(page, "07_exportacion_completada.png")
 
