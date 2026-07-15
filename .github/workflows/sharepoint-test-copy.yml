@@ -30,6 +30,7 @@ jobs:
         run: python bot/validate_sharepoint_test_copy.py
 
       - name: Guardar validación
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validacion-excel-online
