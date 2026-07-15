@@ -2,6 +2,8 @@ import os
 from datetime import date, datetime
 from typing import Any
 
+from openpyxl.formula.translate import Translator
+
 from excel_range_sync import graph_request
 from sharepoint_sync import GRAPH_URL, graph_headers, graph_token, resolve_sharepoint_item
 
@@ -96,6 +98,44 @@ def vertical_values(payload: dict[str, Any], count: int) -> list[list[Any]]:
     return [[source[index][0] if index < len(source) and source[index] else ""] for index in range(count)]
 
 
+def shifted_column_payload(
+    values: list[list[Any]],
+    formulas: list[list[Any]],
+    source_column: int,
+    target_column: int,
+    first_row: int = FIRST_DATA_ROW,
+) -> list[list[Any]]:
+    source_label = column_letter(source_column)
+    target_label = column_letter(target_column)
+    result: list[list[Any]] = []
+    for index, value_row in enumerate(values):
+        row_number = first_row + index
+        value = value_row[0] if value_row else ""
+        formula = (
+            formulas[index][0]
+            if index < len(formulas) and formulas[index]
+            else value
+        )
+        if isinstance(formula, str) and formula.startswith("="):
+            formula = Translator(
+                formula, origin=f"{source_label}{row_number}"
+            ).translate_formula(f"{target_label}{row_number}")
+            result.append([formula])
+        else:
+            result.append([value])
+    return result
+
+
+def cleared_last_column_payload(
+    formulas: list[list[Any]], count: int
+) -> list[list[Any]]:
+    result: list[list[Any]] = []
+    for index in range(count):
+        formula = formulas[index][0] if index < len(formulas) and formulas[index] else ""
+        result.append([formula if isinstance(formula, str) and formula.startswith("=") else 0])
+    return result
+
+
 def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[str, Any]:
     drive_id = item["parentReference"]["driveId"]
     workbook_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item['id']}/workbook"
@@ -143,7 +183,7 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
         current_date = date_rows[0][0] if date_rows and date_rows[0] else None
         new_date = next_excel_date(current_date)
 
-        snapshots: dict[int, list[list[Any]]] = {}
+        snapshots: dict[int, dict[str, list[list[Any]]]] = {}
         for column in cor_columns:
             label = column_letter(column)
             payload = read_range(
@@ -157,10 +197,6 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
                 for index, row in enumerate(formulas)
                 if row and isinstance(row[0], str) and row[0].startswith("=")
             ]
-            if formula_cells and apply_changes:
-                raise RuntimeError(
-                    f"La columna {label} contiene fórmulas dentro de las filas de flores."
-                )
             if formula_cells:
                 first_formula_row = formula_cells[0]
                 first_formula = formulas[first_formula_row - FIRST_DATA_ROW][0]
@@ -170,7 +206,10 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
                     f"primera_fila={first_formula_row} muestra={first_formula!r}",
                     flush=True,
                 )
-            snapshots[column] = vertical_values(payload, row_count)
+            snapshots[column] = {
+                "values": vertical_values(payload, row_count),
+                "formulas": payload.get("formulas", []),
+            }
 
         labels = [column_letter(column) for column in cor_columns]
         result = {
@@ -192,6 +231,7 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
 
         for target, source in zip(cor_columns, cor_columns[1:]):
             target_label = column_letter(target)
+            source_snapshot = snapshots[source]
             graph_request(
                 "PATCH",
                 range_url(
@@ -199,7 +239,14 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
                     f"{target_label}{FIRST_DATA_ROW}:{target_label}{last_data_row}",
                 ),
                 session_headers,
-                json={"values": snapshots[source]},
+                json={
+                    "formulas": shifted_column_payload(
+                        source_snapshot["values"],
+                        source_snapshot["formulas"],
+                        source,
+                        target,
+                    )
+                },
                 timeout=90,
             )
 
@@ -211,7 +258,11 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
                 f"{last_label}{FIRST_DATA_ROW}:{last_label}{last_data_row}",
             ),
             session_headers,
-            json={"values": [[0] for _ in range(row_count)]},
+            json={
+                "formulas": cleared_last_column_payload(
+                    snapshots[cor_columns[-1]]["formulas"], row_count
+                )
+            },
             timeout=90,
         )
         graph_request(

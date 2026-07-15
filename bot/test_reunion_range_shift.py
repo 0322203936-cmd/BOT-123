@@ -5,6 +5,8 @@ from reunion_range_shift import (
     find_cor_columns,
     find_last_data_row,
     next_excel_date,
+    shifted_column_payload,
+    cleared_last_column_payload,
 )
 
 
@@ -34,6 +36,21 @@ class ReunionRangeShiftTests(unittest.TestCase):
     def test_date_advances_one_day(self) -> None:
         self.assertEqual(next_excel_date(46218), 46219)
         self.assertEqual(next_excel_date("7/15/2026"), 46219)
+
+    def test_shift_translates_subtotal_formulas(self) -> None:
+        values = [[100], [40], [60]]
+        formulas = [["=+K4+K5"], [40], [60]]
+        self.assertEqual(
+            shifted_column_payload(values, formulas, 11, 5),
+            [["=+E4+E5"], [40], [60]],
+        )
+
+    def test_last_column_keeps_subtotals_and_clears_inputs(self) -> None:
+        formulas = [["=+BG4+BG5"], [40], [60]]
+        self.assertEqual(
+            cleared_last_column_payload(formulas, 3),
+            [["=+BG4+BG5"], [0], [0]],
+        )
 
 
 if __name__ == "__main__":
