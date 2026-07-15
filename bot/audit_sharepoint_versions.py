@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import requests
 
 from sharepoint_sync import GRAPH_URL, graph_headers, graph_token, resolve_sharepoint_item
@@ -27,6 +30,19 @@ def run() -> None:
             f"actual={version.get('lastVersion', False)} "
             f"autor={actor}"
         )
+
+    version_id = os.environ.get("SHAREPOINT_VERSION_ID", "").strip()
+    if version_id:
+        content = requests.get(
+            f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/versions/{version_id}/content",
+            headers=graph_headers(token),
+            timeout=180,
+        )
+        content.raise_for_status()
+        destination = Path("artifacts/recovery") / f"Reunion_version_{version_id}.xlsm"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content.content)
+        print(f"VERSION_DESCARGADA id={version_id} ruta={destination}")
 
 
 if __name__ == "__main__":

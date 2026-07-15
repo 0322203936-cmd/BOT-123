@@ -2,6 +2,12 @@ name: Auditar versiones SharePoint
 
 on:
   workflow_dispatch:
+    inputs:
+      version_id:
+        description: Versión que se descargará para inspección
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,4 +33,13 @@ jobs:
           SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_VERSION_ID: ${{ inputs.version_id }}
         run: python bot/audit_sharepoint_versions.py
+
+      - name: Guardar versión para inspección
+        if: ${{ inputs.version_id != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharepoint-version-${{ inputs.version_id }}
+          path: artifacts/recovery/*.xlsm
+          retention-days: 2
