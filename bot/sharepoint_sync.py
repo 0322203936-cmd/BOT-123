@@ -238,23 +238,11 @@ def validate_uploaded_workbook(expected_path: Path, remote_path: Path) -> None:
 def sync_report_to_sharepoint(report_path: Path, upload: bool, test_copy: bool = False) -> Path:
     token = graph_token()
     if upload:
-        for attempt in range(1, VERSION_RETRY_ATTEMPTS + 1):
-            item = resolve_sharepoint_item(token)
-            original = download_sharepoint_workbook(token, item)
-            updated = replace_pegar_data(report_path, original)
-            try:
-                upload_sharepoint_workbook(token, item, updated)
-                return updated
-            except SharePointVersionConflict:
-                if attempt >= VERSION_RETRY_ATTEMPTS:
-                    raise RuntimeError(
-                        "El libro siguió recibiendo cambios durante todos los reintentos."
-                    )
-                print(
-                    "Otra persona guardó cambios mientras el bot trabajaba. "
-                    "Se descargará la versión nueva y se conservarán sus cambios "
-                    f"antes de reintentar ({attempt}/{VERSION_RETRY_ATTEMPTS - 1})."
-                )
+        from excel_range_sync import update_pegar_data_range
+
+        item = resolve_sharepoint_item(token)
+        update_pegar_data_range(token, item, report_path)
+        return report_path
 
     item = resolve_sharepoint_item(token)
     original = download_sharepoint_workbook(token, item)
