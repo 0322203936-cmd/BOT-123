@@ -120,12 +120,7 @@ export class App implements OnInit, OnDestroy {
 
   protected async execute(workflow: WorkflowStatus): Promise<void> {
     if (this.running() || this.isActive(workflow.run)) return;
-    if (
-      workflow.key === 'reunion' &&
-      !window.confirm(
-        'Se avanzará la fecha un día y se recorrerán todas las columnas Cor. ¿Deseas continuar?',
-      )
-    ) {
+    if (!this.confirmProtectedExecution(workflow)) {
       return;
     }
 
@@ -167,6 +162,23 @@ export class App implements OnInit, OnDestroy {
     } finally {
       this.running.set(null);
     }
+  }
+
+  private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
+    if (!(['pegarData', 'inventario', 'reunion'] as WorkflowKey[]).includes(workflow.key)) {
+      return true;
+    }
+
+    const response = window.prompt(
+      `Para ejecutar ${workflow.name}, escribe la palabra CONFIRMAR.`,
+    );
+    if ((response ?? '').trim().toUpperCase() === 'CONFIRMAR') {
+      return true;
+    }
+
+    this.message.set('');
+    this.error.set('Ejecución cancelada: debes escribir CONFIRMAR.');
+    return false;
   }
 
   protected isActive(run: WorkflowRun | null): boolean {
