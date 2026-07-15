@@ -119,10 +119,14 @@ def run() -> None:
             capture(page, "05_exportacion_completada.png")
 
             if env_flag("INVENTARIO_UPLOAD", default=False):
-                raise RuntimeError(
-                    "La escritura de Inventario seguirá desactivada hasta validar los encabezados."
-                )
-            print("Modo exploratorio: SharePoint no fue modificado.", flush=True)
+                from inventory_range_sync import update_inventory_range
+                from sharepoint_sync import graph_token, resolve_sharepoint_item
+
+                token = graph_token()
+                item = resolve_sharepoint_item(token)
+                update_inventory_range(token, item, report)
+            else:
+                print("Modo exploratorio: SharePoint no fue modificado.", flush=True)
         except Exception:
             capture(page, "99_error.png")
             raise
