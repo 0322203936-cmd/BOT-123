@@ -178,6 +178,22 @@ def upload_sharepoint_workbook(token: str, item: dict, workbook_path: Path) -> N
     raise RuntimeError("No se pudo validar el archivo guardado en SharePoint.") from last_error
 
 
+def upload_test_copy(token: str, item: dict, workbook_path: Path) -> str:
+    drive_id = item["parentReference"]["driveId"]
+    parent_id = item["parentReference"]["id"]
+    filename = "Reunion 1-2-3 Test BOT PRUEBA.xlsm"
+    response = requests.put(
+        f"{GRAPH_URL}/drives/{drive_id}/items/{parent_id}:/{filename}:/content",
+        headers={**graph_headers(token), "Content-Type": "application/octet-stream"},
+        data=workbook_path.read_bytes(),
+        timeout=180,
+    )
+    response.raise_for_status()
+    web_url = response.json()["webUrl"]
+    print(f"COPIA_PRUEBA_URL={web_url}")
+    return web_url
+
+
 def validate_uploaded_workbook(expected_path: Path, remote_path: Path) -> None:
     if vba_hash(remote_path) != vba_hash(expected_path):
         raise RuntimeError("El VBA remoto no coincide con el archivo validado.")
@@ -211,13 +227,15 @@ def validate_uploaded_workbook(expected_path: Path, remote_path: Path) -> None:
         remote_book.close()
 
 
-def sync_report_to_sharepoint(report_path: Path, upload: bool) -> Path:
+def sync_report_to_sharepoint(report_path: Path, upload: bool, test_copy: bool = False) -> Path:
     token = graph_token()
     item = resolve_sharepoint_item(token)
     original = download_sharepoint_workbook(token, item)
     updated = replace_pegar_data(report_path, original)
     if upload:
         upload_sharepoint_workbook(token, item, updated)
+    elif test_copy:
+        upload_test_copy(token, item, updated)
     else:
         print("Modo de prueba: el libro fue validado, pero no se subió a SharePoint.")
     return updated

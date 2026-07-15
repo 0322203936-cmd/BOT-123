@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      crear_copia_prueba:
+        description: Crear un archivo separado para validar en Excel Online
+        required: true
+        type: boolean
+        default: false
 
 concurrency:
   group: pegar-data-sharepoint
@@ -45,6 +50,7 @@ jobs:
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
           SHAREPOINT_UPLOAD: ${{ inputs.actualizar_sharepoint }}
+          SHAREPOINT_TEST_COPY: ${{ inputs.crear_copia_prueba }}
         run: python bot/pegar_data.py
 
       - name: Guardar capturas y reporte

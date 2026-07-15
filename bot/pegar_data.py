@@ -230,6 +230,7 @@ def run() -> None:
             sync_report_to_sharepoint(
                 formatted_report,
                 upload=env_flag("SHAREPOINT_UPLOAD", default=True),
+                test_copy=env_flag("SHAREPOINT_TEST_COPY", default=False),
             )
             page.wait_for_timeout(5_000)
             capture(page, "07_exportacion_completada.png")
