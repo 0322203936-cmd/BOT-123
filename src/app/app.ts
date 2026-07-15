@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, computed, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
@@ -38,6 +38,9 @@ interface ApiConfig {
 })
 export class App implements OnInit, OnDestroy {
   protected readonly workflows = signal<WorkflowStatus[]>([]);
+  protected readonly visibleWorkflows = computed(() =>
+    this.workflows().filter((workflow) => workflow.key !== 'cancelaciones'),
+  );
   protected readonly loading = signal(true);
   protected readonly running = signal<WorkflowKey | null>(null);
   protected readonly message = signal('');

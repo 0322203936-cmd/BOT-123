@@ -27,7 +27,7 @@
     @if (error()) { <div class="alert error" role="alert">{{ error() }}</div> }
 
     <section class="workflow-grid" aria-label="Automatizaciones disponibles">
-      @for (workflow of workflows(); track workflow.key; let index = $index) {
+      @for (workflow of visibleWorkflows(); track workflow.key; let index = $index) {
         <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'" [class.quaternary]="workflow.key === 'inventario'">
           <div class="card-head">
             <div class="bot-icon" aria-hidden="true">
