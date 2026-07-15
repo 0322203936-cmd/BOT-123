@@ -1,0 +1,43 @@
+name: Procesar Reunion
+
+on:
+  workflow_dispatch:
+    inputs:
+      aplicar_cambios:
+        description: Incrementar la fecha y recorrer todas las columnas Cor
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: bot-procesar-reunion-sharepoint
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  procesar-reunion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r bot/requirements.txt
+
+      - name: Procesar hoja Reunion
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          REUNION_APPLY_CHANGES: ${{ inputs.aplicar_cambios }}
+        run: python -u bot/reunion_range_shift.py
