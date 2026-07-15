@@ -2,12 +2,12 @@ import base64
 import hashlib
 import os
 import time
-from copy import copy
 from pathlib import Path
 from zipfile import ZipFile
 
 import requests
 from openpyxl import load_workbook
+from xlsm_patcher import patch_xlsm
 
 
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
@@ -90,98 +90,40 @@ def vba_hash(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def snapshot_columns_from_s(worksheet, last_column: int) -> list[list[tuple]]:
-    return [
-        [
-            (
-                worksheet.cell(row=row, column=column).value,
-                worksheet.cell(row=row, column=column).data_type,
-                worksheet.cell(row=row, column=column).number_format,
-                copy(worksheet.cell(row=row, column=column)._style),
-                worksheet.cell(row=row, column=column).hyperlink.target
-                if worksheet.cell(row=row, column=column).hyperlink
-                else None,
-                worksheet.cell(row=row, column=column).comment.text
-                if worksheet.cell(row=row, column=column).comment
-                else None,
-            )
-            for column in range(19, last_column + 1)
-        ]
-        for row in range(1, worksheet.max_row + 1)
-    ]
-
-
-def clear_cell(cell) -> None:
-    cell.value = None
-    cell._style = None
-    cell._hyperlink = None
-    cell.comment = None
-
-
-def copy_cell(source, destination) -> None:
-    destination.value = source.value
-    destination._style = copy(source._style)
-    destination._hyperlink = copy(source.hyperlink)
-    destination.comment = copy(source.comment)
-
-
 def replace_pegar_data(report_path: Path, workbook_path: Path) -> Path:
-    source_book = load_workbook(report_path, data_only=False)
-    source = source_book.active
-    if source.max_column != 18:
-        raise RuntimeError(f"El reporte formateado debe tener 18 columnas; tiene {source.max_column}.")
-
     original_vba = vba_hash(workbook_path)
-    target_book = load_workbook(workbook_path, keep_vba=True, keep_links=True)
-    if "PegarData" not in target_book.sheetnames:
-        raise RuntimeError("No existe la hoja PegarData en el libro de SharePoint.")
-    target = target_book["PegarData"]
-
-    preserved_rows = target.max_row
-    preserved_last_column = target.max_column
-    preserved_from_s = snapshot_columns_from_s(target, preserved_last_column)
-
-    for row in range(1, target.max_row + 1):
-        for column in range(1, 19):
-            clear_cell(target.cell(row=row, column=column))
-
-    for row in range(1, source.max_row + 1):
-        for column in range(1, 19):
-            copy_cell(
-                source.cell(row=row, column=column),
-                target.cell(row=row, column=column),
-            )
-
-    for column in range(1, 19):
-        letter = target.cell(row=1, column=column).column_letter
-        target.column_dimensions[letter].width = source.column_dimensions[letter].width
-    for row in range(1, source.max_row + 1):
-        target.row_dimensions[row].height = source.row_dimensions[row].height
-
-    target.auto_filter.ref = f"A1:R{source.max_row}"
     destination = SHAREPOINT_DIR / "Reunion 1-2-3 Test_actualizado.xlsm"
-    target_book.save(destination)
-    target_book.close()
+    patch_xlsm(report_path, workbook_path, destination)
 
     if vba_hash(destination) != original_vba:
         raise RuntimeError("La validación detectó un cambio en el proyecto VBA.")
 
-    verification_book = load_workbook(destination, keep_vba=True, keep_links=True, data_only=False)
+    source_book = load_workbook(report_path, read_only=True, data_only=False)
+    source = source_book.active
+    verification_book = load_workbook(
+        destination, keep_vba=True, keep_links=True, data_only=False
+    )
     verification = verification_book["PegarData"]
-    verification_from_s = snapshot_columns_from_s(verification, preserved_last_column)
-    if verification_from_s[:preserved_rows] != preserved_from_s:
-        raise RuntimeError("La validación detectó cambios desde la columna S.")
-    for row in range(1, source.max_row + 1):
-        for column in range(1, 19):
-            if verification.cell(row=row, column=column).value != source.cell(
-                row=row, column=column
-            ).value:
-                raise RuntimeError(f"El valor pegado no coincide en fila {row}, columna {column}.")
+    expected_table_ref = f"A1:W{source.max_row}"
+    if verification.tables["Table2"].ref != expected_table_ref:
+        raise RuntimeError("Table2 no fue ampliada al nuevo rango de datos.")
+    formulas = [
+        cell
+        for row in verification.iter_rows(
+            min_row=2, max_row=source.max_row, min_col=19, max_col=23
+        )
+        for cell in row
+        if cell.data_type == "f"
+    ]
+    if len(formulas) != (source.max_row - 1) * 5:
+        raise RuntimeError("No se generaron todas las fórmulas auxiliares de S:W.")
+    if any("#REF!" in str(cell.value) for cell in formulas):
+        raise RuntimeError("Se detectaron referencias rotas en S:W.")
     verification_book.close()
     source_book.close()
     print(
         f"PegarData validada: A1:R{source.max_row} reemplazado; "
-        "columnas desde S y VBA conservados."
+        f"Table2 ampliada a {expected_table_ref}; VBA conservado."
     )
     return destination
 
