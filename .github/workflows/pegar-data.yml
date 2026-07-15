@@ -7,7 +7,7 @@ on:
         description: Sobrescribir el archivo de SharePoint
         required: true
         type: boolean
-        default: false
+        default: true
       crear_copia_prueba:
         description: Crear un archivo separado para validar en Excel Online
         required: true
