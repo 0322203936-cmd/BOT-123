@@ -18,6 +18,13 @@ SHAREPOINT_FILE_URL = (
     "file=Reunion%201-2-3%20Test.xlsm&action=default&mobileredirect=true"
 )
 SHAREPOINT_DIR = Path("artifacts/sharepoint")
+LOCK_RETRY_SECONDS = 20
+LOCK_RETRY_ATTEMPTS = 46
+VERSION_RETRY_ATTEMPTS = 10
+
+
+class SharePointVersionConflict(RuntimeError):
+    """El libro cambió entre la descarga y la subida."""
 
 
 def required_secret(name: str) -> str:
@@ -139,19 +146,20 @@ def upload_sharepoint_workbook(token: str, item: dict, workbook_path: Path) -> N
         "If-Match": item["eTag"],
     }
 
-    for attempt in range(1, 7):
+    for attempt in range(1, LOCK_RETRY_ATTEMPTS + 1):
         response = requests.put(upload_url, headers=headers, data=content, timeout=180)
-        if response.status_code == 423 and attempt < 6:
+        if response.status_code in {409, 423} and attempt < LOCK_RETRY_ATTEMPTS:
             print(
-                f"El libro está bloqueado en SharePoint. "
-                f"Reintento {attempt}/5 en 20 segundos..."
+                f"El libro está abierto o bloqueado temporalmente en SharePoint "
+                f"(HTTP {response.status_code}). Reintento "
+                f"{attempt}/{LOCK_RETRY_ATTEMPTS - 1} en "
+                f"{LOCK_RETRY_SECONDS} segundos..."
             )
-            time.sleep(20)
+            time.sleep(LOCK_RETRY_SECONDS)
             continue
         if response.status_code == 412:
-            raise RuntimeError(
-                "El libro cambió en SharePoint durante el proceso; "
-                "se canceló la subida para no sobrescribir cambios recientes."
+            raise SharePointVersionConflict(
+                "El libro cambió en SharePoint durante el proceso."
             )
         response.raise_for_status()
         break
@@ -229,12 +237,29 @@ def validate_uploaded_workbook(expected_path: Path, remote_path: Path) -> None:
 
 def sync_report_to_sharepoint(report_path: Path, upload: bool, test_copy: bool = False) -> Path:
     token = graph_token()
+    if upload:
+        for attempt in range(1, VERSION_RETRY_ATTEMPTS + 1):
+            item = resolve_sharepoint_item(token)
+            original = download_sharepoint_workbook(token, item)
+            updated = replace_pegar_data(report_path, original)
+            try:
+                upload_sharepoint_workbook(token, item, updated)
+                return updated
+            except SharePointVersionConflict:
+                if attempt >= VERSION_RETRY_ATTEMPTS:
+                    raise RuntimeError(
+                        "El libro siguió recibiendo cambios durante todos los reintentos."
+                    )
+                print(
+                    "Otra persona guardó cambios mientras el bot trabajaba. "
+                    "Se descargará la versión nueva y se conservarán sus cambios "
+                    f"antes de reintentar ({attempt}/{VERSION_RETRY_ATTEMPTS - 1})."
+                )
+
     item = resolve_sharepoint_item(token)
     original = download_sharepoint_workbook(token, item)
     updated = replace_pegar_data(report_path, original)
-    if upload:
-        upload_sharepoint_workbook(token, item, updated)
-    elif test_copy:
+    if test_copy:
         upload_test_copy(token, item, updated)
     else:
         print("Modo de prueba: el libro fue validado, pero no se subió a SharePoint.")
