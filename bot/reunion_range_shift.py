@@ -157,9 +157,18 @@ def update_reunion(token: str, item: dict, apply_changes: bool = True) -> dict[s
                 for index, row in enumerate(formulas)
                 if row and isinstance(row[0], str) and row[0].startswith("=")
             ]
-            if formula_cells:
+            if formula_cells and apply_changes:
                 raise RuntimeError(
                     f"La columna {label} contiene fórmulas dentro de las filas de flores."
+                )
+            if formula_cells:
+                first_formula_row = formula_cells[0]
+                first_formula = formulas[first_formula_row - FIRST_DATA_ROW][0]
+                print(
+                    "REUNION_COR_FORMULAS "
+                    f"columna={label} cantidad={len(formula_cells)} "
+                    f"primera_fila={first_formula_row} muestra={first_formula!r}",
+                    flush=True,
                 )
             snapshots[column] = vertical_values(payload, row_count)
 
