@@ -214,15 +214,59 @@ def upload_sharepoint_workbook(token: str, item: dict, workbook_path: Path) -> N
         response.raise_for_status()
         break
 
-    verification = requests.get(
-        upload_url,
-        headers=graph_headers(token),
-        timeout=180,
-    )
-    verification.raise_for_status()
-    if hashlib.sha256(verification.content).digest() != hashlib.sha256(content).digest():
-        raise RuntimeError("El archivo verificado en SharePoint no coincide con el archivo subido.")
-    print("Libro actualizado y verificado correctamente en SharePoint.")
+    verification_path = SHAREPOINT_DIR / "Reunion 1-2-3 Test_verificacion.xlsm"
+    last_error = None
+    for attempt in range(1, 6):
+        verification = requests.get(
+            upload_url,
+            headers=graph_headers(token),
+            timeout=180,
+        )
+        verification.raise_for_status()
+        verification_path.write_bytes(verification.content)
+        try:
+            validate_uploaded_workbook(workbook_path, verification_path)
+            print("Libro actualizado y verificado correctamente en SharePoint.")
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            if attempt < 5:
+                print(f"SharePoint aún procesa el archivo. Verificación {attempt}/5...")
+                time.sleep(5)
+    raise RuntimeError("No se pudo validar el archivo guardado en SharePoint.") from last_error
+
+
+def validate_uploaded_workbook(expected_path: Path, remote_path: Path) -> None:
+    if vba_hash(remote_path) != vba_hash(expected_path):
+        raise RuntimeError("El VBA remoto no coincide con el archivo validado.")
+
+    expected_book = load_workbook(expected_path, keep_vba=True, keep_links=True, data_only=False)
+    remote_book = load_workbook(remote_path, keep_vba=True, keep_links=True, data_only=False)
+    try:
+        if remote_book.sheetnames != expected_book.sheetnames:
+            raise RuntimeError("Las hojas del libro remoto no coinciden.")
+
+        expected = expected_book["PegarData"]
+        remote = remote_book["PegarData"]
+        if (remote.max_row, remote.max_column) != (expected.max_row, expected.max_column):
+            raise RuntimeError("Las dimensiones de PegarData no coinciden.")
+
+        for row in range(1, expected.max_row + 1):
+            for column in range(1, expected.max_column + 1):
+                expected_cell = expected.cell(row=row, column=column)
+                remote_cell = remote.cell(row=row, column=column)
+                if (
+                    remote_cell.value != expected_cell.value
+                    or remote_cell.data_type != expected_cell.data_type
+                    or remote_cell.number_format != expected_cell.number_format
+                    or remote_cell._style != expected_cell._style
+                ):
+                    raise RuntimeError(
+                        f"PegarData remota no coincide en fila {row}, columna {column}."
+                    )
+    finally:
+        expected_book.close()
+        remote_book.close()
 
 
 def sync_report_to_sharepoint(report_path: Path, upload: bool) -> Path:
