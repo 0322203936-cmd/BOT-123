@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import os
+import time
 from copy import copy
 from pathlib import Path
 from zipfile import ZipFile
@@ -188,14 +189,40 @@ def replace_pegar_data(report_path: Path, workbook_path: Path) -> Path:
 def upload_sharepoint_workbook(token: str, item: dict, workbook_path: Path) -> None:
     drive_id = item["parentReference"]["driveId"]
     item_id = item["id"]
-    response = requests.put(
-        f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content",
-        headers={**graph_headers(token), "Content-Type": "application/octet-stream"},
-        data=workbook_path.read_bytes(),
+    content = workbook_path.read_bytes()
+    upload_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content"
+    headers = {
+        **graph_headers(token),
+        "Content-Type": "application/octet-stream",
+        "If-Match": item["eTag"],
+    }
+
+    for attempt in range(1, 7):
+        response = requests.put(upload_url, headers=headers, data=content, timeout=180)
+        if response.status_code == 423 and attempt < 6:
+            print(
+                f"El libro está bloqueado en SharePoint. "
+                f"Reintento {attempt}/5 en 20 segundos..."
+            )
+            time.sleep(20)
+            continue
+        if response.status_code == 412:
+            raise RuntimeError(
+                "El libro cambió en SharePoint durante el proceso; "
+                "se canceló la subida para no sobrescribir cambios recientes."
+            )
+        response.raise_for_status()
+        break
+
+    verification = requests.get(
+        upload_url,
+        headers=graph_headers(token),
         timeout=180,
     )
-    response.raise_for_status()
-    print("Libro actualizado correctamente en SharePoint.")
+    verification.raise_for_status()
+    if hashlib.sha256(verification.content).digest() != hashlib.sha256(content).digest():
+        raise RuntimeError("El archivo verificado en SharePoint no coincide con el archivo subido.")
+    print("Libro actualizado y verificado correctamente en SharePoint.")
 
 
 def sync_report_to_sharepoint(report_path: Path, upload: bool) -> Path:
