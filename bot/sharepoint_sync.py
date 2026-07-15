@@ -89,7 +89,7 @@ def vba_hash(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def snapshot_columns_s_to_w(worksheet) -> list[list[tuple]]:
+def snapshot_columns_from_s(worksheet, last_column: int) -> list[list[tuple]]:
     return [
         [
             (
@@ -104,7 +104,7 @@ def snapshot_columns_s_to_w(worksheet) -> list[list[tuple]]:
                 if worksheet.cell(row=row, column=column).comment
                 else None,
             )
-            for column in range(19, 24)
+            for column in range(19, last_column + 1)
         ]
         for row in range(1, worksheet.max_row + 1)
     ]
@@ -137,7 +137,8 @@ def replace_pegar_data(report_path: Path, workbook_path: Path) -> Path:
     target = target_book["PegarData"]
 
     preserved_rows = target.max_row
-    preserved_s_to_w = snapshot_columns_s_to_w(target)
+    preserved_last_column = target.max_column
+    preserved_from_s = snapshot_columns_from_s(target, preserved_last_column)
 
     for row in range(1, target.max_row + 1):
         for column in range(1, 19):
@@ -166,8 +167,9 @@ def replace_pegar_data(report_path: Path, workbook_path: Path) -> Path:
 
     verification_book = load_workbook(destination, keep_vba=True, keep_links=True, data_only=False)
     verification = verification_book["PegarData"]
-    if snapshot_columns_s_to_w(verification)[:preserved_rows] != preserved_s_to_w:
-        raise RuntimeError("La validación detectó cambios en las columnas S:W.")
+    verification_from_s = snapshot_columns_from_s(verification, preserved_last_column)
+    if verification_from_s[:preserved_rows] != preserved_from_s:
+        raise RuntimeError("La validación detectó cambios desde la columna S.")
     for row in range(1, source.max_row + 1):
         for column in range(1, 19):
             if verification.cell(row=row, column=column).value != source.cell(
@@ -178,7 +180,7 @@ def replace_pegar_data(report_path: Path, workbook_path: Path) -> Path:
     source_book.close()
     print(
         f"PegarData validada: A1:R{source.max_row} reemplazado; "
-        "S:W y VBA conservados."
+        "columnas desde S y VBA conservados."
     )
     return destination
 
