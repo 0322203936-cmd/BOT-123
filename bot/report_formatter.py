@@ -13,6 +13,16 @@ def copy_cell(source, destination) -> None:
     destination.comment = copy(source.comment)
 
 
+def corrected_veronica_txr(description: object, txr_value: float | None) -> int:
+    """Conserva 8/10 y asigna 10, salvo el bouquet identificado como PK 8."""
+    normalized_description = str(description or "").strip().upper()
+    if "NCP WILDFLOWER BOUQUET PK 8" in normalized_description:
+        return 8
+    if txr_value in {8.0, 10.0}:
+        return int(txr_value)
+    return 10
+
+
 def format_downloaded_report(source_path: Path) -> Path:
     """Reordena columnas, ajusta txr_orden y activa filtros."""
     workbook = load_workbook(source_path)
@@ -54,14 +64,15 @@ def format_downloaded_report(source_path: Path) -> Path:
         txr_cell = worksheet.cell(row=row, column=18)
 
         if flower.startswith("VERONICA"):
+            description = worksheet.cell(row=row, column=7).value
             try:
                 txr_value = float(str(txr_cell.value).strip())
             except (TypeError, ValueError):
                 txr_value = None
-            if txr_value != 10.0:
-                txr_cell.value = 8
-                if txr_value != 8.0:
-                    changed_veronica += 1
+            corrected_txr = corrected_veronica_txr(description, txr_value)
+            if txr_value != float(corrected_txr):
+                txr_cell.value = corrected_txr
+                changed_veronica += 1
         elif flower.startswith("SNAPDRAGON"):
             try:
                 txr_value = float(str(txr_cell.value).strip())
