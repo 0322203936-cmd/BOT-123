@@ -14,8 +14,8 @@ GRAPH_URL = "https://graph.microsoft.com/v1.0"
 SHAREPOINT_FILE_URL = (
     "https://pacificafarms.sharepoint.com/:x:/r/sites/"
     "requerimientovsproyeccion/_layouts/15/Doc.aspx?"
-    "sourcedoc=%7BF5574BDC-EC82-44BF-8D2E-B42CEB29D586%7D&"
-    "file=Reunion%201-2-3%20Test.xlsm&action=default&mobileredirect=true"
+    "sourcedoc=%7BB4151F11-DDFD-48DC-8283-F6D684396F87%7D&"
+    "file=Reunion%201-2-3%20Copia%20IRENE.xlsm&action=default&mobileredirect=true"
 )
 SHAREPOINT_DIR = Path("artifacts/sharepoint")
 LOCK_RETRY_SECONDS = 20
@@ -67,7 +67,7 @@ def resolve_sharepoint_item(token: str) -> dict:
     )
     response.raise_for_status()
     item = response.json()
-    if item.get("name", "").lower() != "reunion 1-2-3 test.xlsm":
+    if item.get("name", "").lower() != "reunion 1-2-3 copia irene.xlsm":
         raise RuntimeError(f"SharePoint devolvió un archivo inesperado: {item.get('name')}.")
     return item
 
