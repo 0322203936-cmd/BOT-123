@@ -16,6 +16,13 @@ DATA_COLUMNS = 18
 TABLE_COLUMNS = 23
 CHUNK_SIZE = 200
 RETRYABLE_STATUS = {409, 429, 502, 503, 504}
+CALCULATED_HEADERS = [
+    "Flor Tallos",
+    "TxR2",
+    "Flor Color2",
+    "Flor Color 3",
+    "Flor Color 4",
+]
 
 
 def clean_value(value: Any) -> str | int | float | bool:
@@ -97,6 +104,72 @@ def range_url(workbook_url: str, start_row: int, end_row: int) -> str:
     )
 
 
+def calculated_range_url(workbook_url: str, start_row: int, end_row: int) -> str:
+    address = f"S{start_row}:W{end_row}"
+    return (
+        f"{workbook_url}/worksheets/{SHEET_NAME}/"
+        f"range(address='{address}')"
+    )
+
+
+def calculated_formulas(row: int) -> list[str]:
+    return [
+        '=+Table2[[#This Row],[FLOR]]&" "&"X"&" " & Table2[[#This Row],[txr_orden]]',
+        "=Table2[[#This Row],[txr_orden]]",
+        '=+Table2[[#This Row],[FLOR]] & " " &Table2[[#This Row],[Flor Color]]',
+        '=+Table2[[#This Row],[FLOR]] & " " & Table2[[#This Row],[Flor Color]]&"X"&" " & Table2[[#This Row],[TxR2]]',
+        f'=E{row} & " " & " X " & T{row}',
+    ]
+
+
+def patch_calculated_rows(
+    workbook_url: str,
+    headers: dict[str, str],
+    start_row: int,
+    count: int,
+) -> None:
+    if count < 1:
+        return
+    end_row = start_row + count - 1
+    formulas = [calculated_formulas(row) for row in range(start_row, end_row + 1)]
+    graph_request(
+        "PATCH",
+        calculated_range_url(workbook_url, start_row, end_row),
+        headers,
+        json={"formulas": formulas},
+        timeout=120,
+    )
+
+
+def verify_calculated_rows(
+    workbook_url: str,
+    headers: dict[str, str],
+    start_row: int,
+    count: int,
+) -> None:
+    if count < 1:
+        return
+    end_row = start_row + count - 1
+    formulas = graph_request(
+        "GET",
+        calculated_range_url(workbook_url, start_row, end_row),
+        headers,
+        timeout=120,
+    ).json().get("formulas", [])
+    if len(formulas) != count or any(
+        len(formula_row) != len(CALCULATED_HEADERS)
+        or any(
+            not isinstance(formula, str) or not formula.startswith("=")
+            for formula in formula_row
+        )
+        for formula_row in formulas
+    ):
+        raise RuntimeError(
+            f"Las formulas S:W no se propagaron completamente en las filas "
+            f"{start_row}:{end_row}."
+        )
+
+
 def patch_rows(
     workbook_url: str,
     headers: dict[str, str],
@@ -159,6 +232,18 @@ def update_pegar_data_range(token: str, item: dict, report_path: Path) -> int:
                 "se cancelo la escritura para proteger el libro."
             )
 
+        calculated_headers = graph_request(
+            "GET",
+            calculated_range_url(workbook_url, 1, 1),
+            session_headers,
+            timeout=60,
+        ).json().get("values", [[]])[0]
+        if calculated_headers != CALCULATED_HEADERS:
+            raise RuntimeError(
+                "Los encabezados S:W de PegarData no coinciden; "
+                "se cancelo la escritura para proteger las formulas."
+            )
+
         table = graph_request(
             "GET",
             f"{workbook_url}/tables/{TABLE_NAME}/range",
@@ -197,6 +282,21 @@ def update_pegar_data_range(token: str, item: dict, report_path: Path) -> int:
                 report_data[offset : offset + CHUNK_SIZE],
             )
 
+        for start_row in range(2, len(rows) + 1, CHUNK_SIZE):
+            count = min(CHUNK_SIZE, len(rows) - start_row + 1)
+            patch_calculated_rows(
+                workbook_url,
+                session_headers,
+                start_row,
+                count,
+            )
+            verify_calculated_rows(
+                workbook_url,
+                session_headers,
+                start_row,
+                count,
+            )
+
         last_row = max(len(rows), 1)
         final_row = graph_request(
             "GET",
@@ -209,7 +309,8 @@ def update_pegar_data_range(token: str, item: dict, report_path: Path) -> int:
 
         print(
             f"EXCEL_RANGE_UPDATE_OK hoja={SHEET_NAME} rango=A1:R{last_row} "
-            f"filas_datos={len(report_data)} libro_no_reemplazado=true",
+            f"formulas=S2:W{last_row} filas_datos={len(report_data)} "
+            "libro_no_reemplazado=true",
             flush=True,
         )
         return len(report_data)
