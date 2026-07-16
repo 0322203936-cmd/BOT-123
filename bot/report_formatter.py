@@ -13,13 +13,13 @@ def copy_cell(source, destination) -> None:
     destination.comment = copy(source.comment)
 
 
-def corrected_veronica_txr(description: object, txr_value: float | None) -> int:
-    """Conserva 8/10 y asigna 10, salvo el bouquet identificado como PK 8."""
-    normalized_description = str(description or "").strip().upper()
-    if "NCP WILDFLOWER BOUQUET PK 8" in normalized_description:
+def corrected_veronica_txr(category: object, txr_value: float | None) -> int:
+    """Asigna 8 a Bouquet y normaliza el resto de Veronica a 10."""
+    normalized_category = str(category or "").strip().upper()
+    if normalized_category == "BOUQUET":
         return 8
-    if txr_value in {8.0, 10.0}:
-        return int(txr_value)
+    if txr_value == 10.0:
+        return 10
     return 10
 
 
@@ -64,12 +64,12 @@ def format_downloaded_report(source_path: Path) -> Path:
         txr_cell = worksheet.cell(row=row, column=18)
 
         if flower.startswith("VERONICA"):
-            description = worksheet.cell(row=row, column=7).value
+            category = worksheet.cell(row=row, column=4).value
             try:
                 txr_value = float(str(txr_cell.value).strip())
             except (TypeError, ValueError):
                 txr_value = None
-            corrected_txr = corrected_veronica_txr(description, txr_value)
+            corrected_txr = corrected_veronica_txr(category, txr_value)
             if txr_value != float(corrected_txr):
                 txr_cell.value = corrected_txr
                 changed_veronica += 1

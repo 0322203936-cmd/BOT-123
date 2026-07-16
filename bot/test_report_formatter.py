@@ -4,19 +4,14 @@ from report_formatter import corrected_veronica_txr
 
 
 class CorrectedVeronicaTxrTests(unittest.TestCase):
-    def test_preserves_existing_eight_and_ten(self) -> None:
-        self.assertEqual(corrected_veronica_txr("VERONICA", 8.0), 8)
-        self.assertEqual(corrected_veronica_txr("VERONICA", 10.0), 10)
+    def test_bouquet_is_always_eight(self) -> None:
+        self.assertEqual(corrected_veronica_txr("BOUQUET", -1.0), 8)
+        self.assertEqual(corrected_veronica_txr(" bouquet ", 10.0), 8)
 
-    def test_converts_other_values_to_ten(self) -> None:
-        self.assertEqual(corrected_veronica_txr("VERONICA", -1.0), 10)
-        self.assertEqual(corrected_veronica_txr("VERONICA", None), 10)
-
-    def test_keeps_wildflower_pk_8_exception_at_eight(self) -> None:
-        self.assertEqual(
-            corrected_veronica_txr("NCP WILDFLOWER BOUQUET PK 8", -1.0),
-            8,
-        )
+    def test_other_categories_are_ten(self) -> None:
+        self.assertEqual(corrected_veronica_txr("CB / BULK", 10.0), 10)
+        self.assertEqual(corrected_veronica_txr("CB / BULK", -1.0), 10)
+        self.assertEqual(corrected_veronica_txr(None, None), 10)
 
 
 if __name__ == "__main__":
