@@ -58,9 +58,10 @@ def format_downloaded_report(source_path: Path) -> Path:
                 txr_value = float(str(txr_cell.value).strip())
             except (TypeError, ValueError):
                 txr_value = None
-            if txr_value not in {8.0, 10.0}:
+            if txr_value != 10.0:
                 txr_cell.value = 8
-                changed_veronica += 1
+                if txr_value != 8.0:
+                    changed_veronica += 1
         elif flower.startswith("SNAPDRAGON"):
             try:
                 txr_value = float(str(txr_cell.value).strip())
