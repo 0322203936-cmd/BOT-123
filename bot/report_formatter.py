@@ -67,7 +67,7 @@ def format_downloaded_report(source_path: Path) -> Path:
             except (TypeError, ValueError):
                 txr_value = None
             if txr_value not in {5.0, 10.0}:
-                txr_cell.value = 10
+                txr_cell.value = 5
                 changed_snapdragon += 1
 
     worksheet.delete_cols(19, 1)
