@@ -59,6 +59,7 @@ def format_downloaded_report(source_path: Path) -> Path:
 
     changed_veronica = 0
     changed_snapdragon = 0
+    changed_matricaria = 0
     for row in range(2, worksheet.max_row + 1):
         flower = str(worksheet.cell(row=row, column=5).value or "").strip().upper()
         txr_cell = worksheet.cell(row=row, column=18)
@@ -81,6 +82,14 @@ def format_downloaded_report(source_path: Path) -> Path:
             if txr_value not in {5.0, 10.0}:
                 txr_cell.value = 5
                 changed_snapdragon += 1
+        elif flower == "MATRICARIA":
+            try:
+                txr_value = float(str(txr_cell.value).strip())
+            except (TypeError, ValueError):
+                txr_value = None
+            if txr_value not in {4.0, 5.0, 10.0}:
+                txr_cell.value = 6
+                changed_matricaria += 1
 
     worksheet.delete_cols(19, 1)
 
@@ -92,7 +101,7 @@ def format_downloaded_report(source_path: Path) -> Path:
     workbook.close()
     print(
         "Ajustes txr_orden: "
-        f"Veronica={changed_veronica}, Snapdragon={changed_snapdragon}"
+        f"Veronica={changed_veronica}, Snapdragon={changed_snapdragon}, Matricaria={changed_matricaria}"
     )
     print(f"Reporte formateado: {destination}")
     return destination
