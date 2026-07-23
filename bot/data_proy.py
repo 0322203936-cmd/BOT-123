@@ -122,20 +122,31 @@ def main():
         
         rows_by_week = {w: [] for w in weeks}
         
+        week_idx = 0
         current_corte_week = None
+        
         for idx, row_data in enumerate(values):
-            if len(row_data) > max(col_h_rel, col_s_rel) and col_h_rel >= 0:
+            if len(row_data) > col_h_rel and col_h_rel >= 0:
                 desc = str(row_data[col_h_rel]).strip().upper()
-                semana = row_data[col_s_rel]
                 
-                if desc == "CORTE" and semana in weeks:
-                    current_corte_week = semana
-                    excel_row = start_row + idx
-                    rows_by_week[semana].append(excel_row)
-                elif desc in ["", "NONE", "NULL"] and semana == current_corte_week:
-                    excel_row = start_row + idx
-                    rows_by_week[semana].append(excel_row)
-                elif desc and desc not in ["", "NONE", "NULL"]:
+                if desc == "CORTE":
+                    if current_corte_week is None:
+                        # Empezamos un bloque CORTE nuevo
+                        if week_idx < len(weeks):
+                            current_corte_week = weeks[week_idx]
+                            week_idx += 1
+                    
+                    if current_corte_week is not None:
+                        excel_row = start_row + idx
+                        rows_by_week[current_corte_week].append(excel_row)
+                        
+                elif desc in ["", "NONE", "NULL"]:
+                    if current_corte_week is not None:
+                        excel_row = start_row + idx
+                        rows_by_week[current_corte_week].append(excel_row)
+                        
+                else:
+                    # Encontramos otra descripcion (COMPRA, INVENTARIO, etc.)
                     current_corte_week = None
                     
         for i, week in enumerate(weeks):
@@ -163,6 +174,7 @@ def main():
                 
                 flor_color_desc_values = []
                 tallos_values = []
+                semana_values = []
                 
                 for _ in range(count):
                     if flower_idx < len(flowers_data):
@@ -172,6 +184,7 @@ def main():
                     else:
                         flor_color_desc_values.append(["", "", "CORTE"])
                         tallos_values.append([""])
+                    semana_values.append([week])
                     flower_idx += 1
                     
                 print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
@@ -189,6 +202,14 @@ def main():
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
                     session_headers, 
                     json={"values": tallos_values}
+                )
+                
+                address_s = f"S{start_r}:S{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
+                    session_headers, 
+                    json={"values": semana_values}
                 )
 
         print("Edición en vivo finalizada con éxito.")
