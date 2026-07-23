@@ -45,8 +45,24 @@ def main():
     ws_plan = wb_plan[latest_sheet_name]
     print(f"Hoja detectada: {latest_sheet_name}")
     
-    current_week = int(latest_sheet_name[-2:])
-    weeks = [current_week + i for i in range(8)]
+    import re
+    def get_week(col):
+        val = ws_plan.cell(row=4, column=col).value
+        if val is None: return ""
+        nums = re.findall(r'\d+', str(val))
+        return int(nums[0]) if nums else str(val).strip()
+        
+    weeks = [
+        get_week(6),
+        get_week(18),
+        get_week(19),
+        get_week(20),
+        get_week(21),
+        get_week(22),
+        get_week(23),
+        get_week(24)
+    ]
+    print(f"Semanas detectadas desde los encabezados: {weeks}")
     print(f"Semanas a procesar: {weeks}")
 
     flowers_data = []
