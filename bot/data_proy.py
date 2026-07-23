@@ -64,13 +64,13 @@ def main():
             continue
             
         qty_30 = ws_plan.cell(row=row, column=6).value or 0
-        qty_31 = ws_plan.cell(row=row, column=19).value or 0
-        qty_32 = ws_plan.cell(row=row, column=20).value or 0
-        qty_33 = ws_plan.cell(row=row, column=21).value or 0
-        qty_34 = ws_plan.cell(row=row, column=22).value or 0
-        qty_35 = ws_plan.cell(row=row, column=23).value or 0
-        qty_36 = ws_plan.cell(row=row, column=24).value or 0
-        qty_37 = ws_plan.cell(row=row, column=25).value or 0
+        qty_31 = ws_plan.cell(row=row, column=18).value or 0
+        qty_32 = ws_plan.cell(row=row, column=19).value or 0
+        qty_33 = ws_plan.cell(row=row, column=20).value or 0
+        qty_34 = ws_plan.cell(row=row, column=21).value or 0
+        qty_35 = ws_plan.cell(row=row, column=22).value or 0
+        qty_36 = ws_plan.cell(row=row, column=23).value or 0
+        qty_37 = ws_plan.cell(row=row, column=24).value or 0
         
         flowers_data.append({
             "flor": flor_real,
