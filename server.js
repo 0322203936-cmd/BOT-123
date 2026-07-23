@@ -58,6 +58,15 @@ const workflows = {
     description: 'Avanza la fecha y recorre los campos Cor de la hoja Reunion.',
     schedule: 'Ejecución manual',
   },
+  dataProy: {
+    owner,
+    repo: process.env.DATA_PROY_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'data-proy.yml',
+    name: 'Data Proy',
+    description: 'Cruza proyecciones del Plan de Cosecha hacia Requerimientos.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();

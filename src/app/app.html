@@ -28,7 +28,7 @@
 
     <section class="workflow-grid" aria-label="Automatizaciones disponibles">
       @for (workflow of visibleWorkflows(); track workflow.key; let index = $index) {
-        <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'" [class.quaternary]="workflow.key === 'inventario'" [class.quinary]="workflow.key === 'reunion'">
+        <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'" [class.quaternary]="workflow.key === 'inventario'" [class.quinary]="workflow.key === 'reunion' || workflow.key === 'dataProy'">
           <div class="card-head">
             <div class="bot-icon" aria-hidden="true">
               @if (workflow.key === 'galleria') {
@@ -39,6 +39,8 @@
                 <svg viewBox="0 0 24 24"><path d="M8 4h8v3H8zM6 6v15h12V6M9 11h6M9 15h6M9 19h4" /></svg>
               } @else if (workflow.key === 'inventario') {
                 <svg viewBox="0 0 24 24"><path d="M4 7h16v13H4zM7 4h10v3M8 11h3M13 11h3M8 15h3M13 15h3" /></svg>
+              } @else if (workflow.key === 'dataProy') {
+                <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4V4zm4 4h8v2H8V8zm0 4h8v2H8v-2zm0 4h8v2H8v-2z" /></svg>
               } @else {
                 <svg viewBox="0 0 24 24"><path d="M7 3h10v4H7zM5 7h14v14H5zM8 11h8M8 15h5M16 14v4M14 16h4" /></svg>
               }

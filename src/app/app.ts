@@ -4,7 +4,7 @@ import { Component, computed, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion' | 'dataProy';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
@@ -165,7 +165,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
-    if (!(['pegarData', 'inventario', 'reunion'] as WorkflowKey[]).includes(workflow.key)) {
+    if (!(['pegarData', 'inventario', 'reunion', 'dataProy'] as WorkflowKey[]).includes(workflow.key)) {
       return true;
     }
 

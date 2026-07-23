@@ -72,6 +72,16 @@ def resolve_sharepoint_item(token: str) -> dict:
     return item
 
 
+def resolve_sharepoint_item_by_url(token: str, url: str) -> dict:
+    response = requests.get(
+        f"{GRAPH_URL}/shares/{share_id(url)}/driveItem",
+        headers=graph_headers(token),
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def download_sharepoint_workbook(token: str, item: dict) -> Path:
     drive_id = item["parentReference"]["driveId"]
     item_id = item["id"]
@@ -85,6 +95,22 @@ def download_sharepoint_workbook(token: str, item: dict) -> Path:
     destination = SHAREPOINT_DIR / "Reunion 1-2-3 Test_original.xlsm"
     destination.write_bytes(response.content)
     print(f"Libro de SharePoint descargado: {destination}")
+    return destination
+
+
+def download_sharepoint_file(token: str, item: dict, dest_filename: str) -> Path:
+    drive_id = item["parentReference"]["driveId"]
+    item_id = item["id"]
+    response = requests.get(
+        f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content",
+        headers=graph_headers(token),
+        timeout=120,
+    )
+    response.raise_for_status()
+    SHAREPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    destination = SHAREPOINT_DIR / dest_filename
+    destination.write_bytes(response.content)
+    print(f"Archivo de SharePoint descargado: {destination}")
     return destination
 
 
@@ -184,6 +210,35 @@ def upload_sharepoint_workbook(token: str, item: dict, workbook_path: Path) -> N
                 print(f"SharePoint aún procesa el archivo. Verificación {attempt}/5...")
                 time.sleep(5)
     raise RuntimeError("No se pudo validar el archivo guardado en SharePoint.") from last_error
+
+
+def upload_sharepoint_file(token: str, item: dict, filepath: Path) -> None:
+    drive_id = item["parentReference"]["driveId"]
+    item_id = item["id"]
+    content = filepath.read_bytes()
+    upload_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content"
+    headers = {
+        **graph_headers(token),
+        "Content-Type": "application/octet-stream",
+        "If-Match": item["eTag"],
+    }
+
+    for attempt in range(1, LOCK_RETRY_ATTEMPTS + 1):
+        response = requests.put(upload_url, headers=headers, data=content, timeout=180)
+        if response.status_code in {409, 423} and attempt < LOCK_RETRY_ATTEMPTS:
+            print(
+                f"El archivo está abierto o bloqueado temporalmente en SharePoint "
+                f"(HTTP {response.status_code}). Reintento "
+                f"{attempt}/{LOCK_RETRY_ATTEMPTS - 1} en "
+                f"{LOCK_RETRY_SECONDS} segundos..."
+            )
+            time.sleep(LOCK_RETRY_SECONDS)
+            continue
+        if response.status_code == 412:
+            raise SharePointVersionConflict("El archivo cambió en SharePoint durante el proceso.")
+        response.raise_for_status()
+        print(f"Archivo subido correctamente a SharePoint: {filepath.name}")
+        break
 
 
 def upload_test_copy(token: str, item: dict, workbook_path: Path) -> str:
