@@ -137,6 +137,7 @@ def main():
         col_s_rel = col_letter_to_index("S") - start_col_idx
         
         rows_by_week = {w: [] for w in weeks}
+        rows_to_clear = []
         
         in_corte_block = False
         seen_compra = False
@@ -164,6 +165,10 @@ def main():
                         rows_by_week[current_week].append(excel_row)
                         
                 corte_count += 1
+            elif seen_compra and desc == "CORTE" and corte_count >= total_corte_rows_needed:
+                # Leftover CORTE row from a previous execution
+                excel_row = start_row + idx
+                rows_to_clear.append(excel_row)
             else:
                 in_corte_block = False
                     
@@ -228,6 +233,55 @@ def main():
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
                     session_headers, 
                     json={"values": semana_values}
+                )
+
+        if rows_to_clear:
+            print(f"Limpiando {len(rows_to_clear)} filas residuales de CORTE de ejecuciones anteriores...")
+            clear_blocks = []
+            current_clear_block = []
+            for r in sorted(rows_to_clear):
+                if not current_clear_block:
+                    current_clear_block.append(r)
+                elif r == current_clear_block[-1] + 1:
+                    current_clear_block.append(r)
+                else:
+                    clear_blocks.append(current_clear_block)
+                    current_clear_block = [r]
+            if current_clear_block:
+                clear_blocks.append(current_clear_block)
+                
+            for block in clear_blocks:
+                start_r = block[0]
+                end_r = block[-1]
+                count = len(block)
+                
+                empty_fh = [["", "", ""] for _ in range(count)]
+                empty_single = [[""] for _ in range(count)]
+                
+                print(f"Limpiando bloque {start_r}:{end_r}")
+                
+                address_fh = f"F{start_r}:H{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
+                    session_headers, 
+                    json={"values": empty_fh}
+                )
+                
+                address_o = f"O{start_r}:O{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
+                    session_headers, 
+                    json={"values": empty_single}
+                )
+                
+                address_s = f"S{start_r}:S{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
+                    session_headers, 
+                    json={"values": empty_single}
                 )
 
         print("Edición en vivo finalizada con éxito.")
