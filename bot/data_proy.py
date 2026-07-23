@@ -117,15 +117,15 @@ def main():
         start_row = int(match.group(2)) if match else 1
         
         start_col_idx = col_letter_to_index(start_col_str)
-        col_d_rel = col_letter_to_index("D") - start_col_idx
-        col_o_rel = col_letter_to_index("O") - start_col_idx
+        col_h_rel = col_letter_to_index("H") - start_col_idx
+        col_s_rel = col_letter_to_index("S") - start_col_idx
         
         rows_by_week = {w: [] for w in weeks}
         
         for idx, row_data in enumerate(values):
-            if len(row_data) > max(col_d_rel, col_o_rel) and col_d_rel >= 0:
-                desc = row_data[col_d_rel]
-                semana = row_data[col_o_rel]
+            if len(row_data) > max(col_h_rel, col_s_rel) and col_h_rel >= 0:
+                desc = row_data[col_h_rel]
+                semana = row_data[col_s_rel]
                 if str(desc).strip().upper() == "CORTE" and semana in weeks:
                     excel_row = start_row + idx
                     rows_by_week[semana].append(excel_row)
@@ -167,18 +167,18 @@ def main():
                     flower_idx += 1
                     
                 print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
-                address_bc = f"B{start_r}:C{end_r}"
+                address_fg = f"F{start_r}:G{end_r}"
                 graph_request(
                     "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_bc}')", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fg}')", 
                     session_headers, 
                     json={"values": flor_color_values}
                 )
                 
-                address_k = f"K{start_r}:K{end_r}"
+                address_o = f"O{start_r}:O{end_r}"
                 graph_request(
                     "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_k}')", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
                     session_headers, 
                     json={"values": tallos_values}
                 )
