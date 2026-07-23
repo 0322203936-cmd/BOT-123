@@ -122,32 +122,27 @@ def main():
         
         rows_by_week = {w: [] for w in weeks}
         
-        week_idx = 0
-        current_corte_week = None
+        in_corte_block = False
+        corte_count = 0
+        num_flowers = len(flowers_data)
         
         for idx, row_data in enumerate(values):
             if len(row_data) > col_h_rel and col_h_rel >= 0:
                 desc = str(row_data[col_h_rel]).strip().upper()
                 
-                if desc == "CORTE":
-                    if current_corte_week is None:
-                        # Empezamos un bloque CORTE nuevo
-                        if week_idx < len(weeks):
-                            current_corte_week = weeks[week_idx]
-                            week_idx += 1
+                if desc == "CORTE" or (desc in ["", "NONE", "NULL"] and in_corte_block):
+                    in_corte_block = True
                     
-                    if current_corte_week is not None:
-                        excel_row = start_row + idx
-                        rows_by_week[current_corte_week].append(excel_row)
-                        
-                elif desc in ["", "NONE", "NULL"]:
-                    if current_corte_week is not None:
-                        excel_row = start_row + idx
-                        rows_by_week[current_corte_week].append(excel_row)
-                        
+                    if num_flowers > 0:
+                        week_idx = corte_count // num_flowers
+                        if week_idx < len(weeks):
+                            current_week = weeks[week_idx]
+                            excel_row = start_row + idx
+                            rows_by_week[current_week].append(excel_row)
+                            
+                    corte_count += 1
                 else:
-                    # Encontramos otra descripcion (COMPRA, INVENTARIO, etc.)
-                    current_corte_week = None
+                    in_corte_block = False
                     
         for i, week in enumerate(weeks):
             target_rows = sorted(rows_by_week[week])
