@@ -122,13 +122,21 @@ def main():
         
         rows_by_week = {w: [] for w in weeks}
         
+        current_corte_week = None
         for idx, row_data in enumerate(values):
             if len(row_data) > max(col_h_rel, col_s_rel) and col_h_rel >= 0:
-                desc = row_data[col_h_rel]
+                desc = str(row_data[col_h_rel]).strip().upper()
                 semana = row_data[col_s_rel]
-                if str(desc).strip().upper() == "CORTE" and semana in weeks:
+                
+                if desc == "CORTE" and semana in weeks:
+                    current_corte_week = semana
                     excel_row = start_row + idx
                     rows_by_week[semana].append(excel_row)
+                elif desc in ["", "NONE", "NULL"] and semana == current_corte_week:
+                    excel_row = start_row + idx
+                    rows_by_week[semana].append(excel_row)
+                elif desc and desc not in ["", "NONE", "NULL"]:
+                    current_corte_week = None
                     
         for i, week in enumerate(weeks):
             target_rows = sorted(rows_by_week[week])
@@ -153,26 +161,26 @@ def main():
                 end_r = block[-1]
                 count = len(block)
                 
-                flor_color_values = []
+                flor_color_desc_values = []
                 tallos_values = []
                 
                 for _ in range(count):
                     if flower_idx < len(flowers_data):
                         item = flowers_data[flower_idx]
-                        flor_color_values.append([item["flor"], item["color"]])
+                        flor_color_desc_values.append([item["flor"], item["color"], "CORTE"])
                         tallos_values.append([item["qtys"][i]])
                     else:
-                        flor_color_values.append(["", ""])
+                        flor_color_desc_values.append(["", "", "CORTE"])
                         tallos_values.append([""])
                     flower_idx += 1
                     
                 print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
-                address_fg = f"F{start_r}:G{end_r}"
+                address_fh = f"F{start_r}:H{end_r}"
                 graph_request(
                     "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fg}')", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
                     session_headers, 
-                    json={"values": flor_color_values}
+                    json={"values": flor_color_desc_values}
                 )
                 
                 address_o = f"O{start_r}:O{end_r}"
