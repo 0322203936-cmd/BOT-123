@@ -1,17 +1,26 @@
 import os
+import re
 import sys
 from pathlib import Path
 import openpyxl
 
 from sharepoint_sync import (
+    GRAPH_URL,
+    graph_headers,
     graph_token,
     resolve_sharepoint_item_by_url,
     download_sharepoint_file,
-    upload_sharepoint_file
 )
+from excel_range_sync import graph_request
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B277A76AA-508A-47F8-8A4A-F19D46660D65%7D&file=Requerimiento%20vs%20proyeccion%20Test.xlsm&action=default&mobileredirect=true"
 PLAN_COSECHA_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B0A3464AB-7BD8-400A-A0E6-5BC92E23CE3E%7D&file=Plan%20de%20cosecha%202026%20Test.xlsx&action=default&mobileredirect=true"
+
+def col_letter_to_index(letter):
+    idx = 0
+    for char in letter.upper():
+        idx = idx * 26 + (ord(char) - ord('A') + 1)
+    return idx - 1
 
 def main():
     print("Obteniendo token de Microsoft Graph...")
@@ -21,13 +30,10 @@ def main():
     item_req = resolve_sharepoint_item_by_url(token, REQ_PROY_URL)
     item_plan = resolve_sharepoint_item_by_url(token, PLAN_COSECHA_URL)
     
-    print("Descargando Plan de cosecha...")
+    print("Descargando Plan de cosecha (solo lectura)...")
     plan_file = download_sharepoint_file(token, item_plan, "Plan de cosecha 2026 Test_BOT.xlsx")
     
-    print("Descargando Requerimiento vs proyeccion...")
-    req_file = download_sharepoint_file(token, item_req, "Requerimiento vs proyeccion Test_BOT.xlsm")
-
-    print(f"Abriendo {plan_file} (solo lectura de datos)...")
+    print(f"Abriendo {plan_file}...")
     wb_plan = openpyxl.load_workbook(plan_file, data_only=True)
     
     cosecha_sheets = [s for s in wb_plan.sheetnames if s.startswith("P Cosecha ")]
@@ -75,51 +81,120 @@ def main():
     print(f"Se extrajeron {len(flowers_data)} flores.")
     wb_plan.close()
 
-    print(f"Abriendo {req_file} para escritura (conservando VBA y fórmulas)...")
-    wb_req = openpyxl.load_workbook(req_file, keep_vba=True)
-    if "DataProy" not in wb_req.sheetnames:
-        print("Error: No se encontró la hoja DataProy")
-        sys.exit(1)
-        
-    ws_req = wb_req["DataProy"]
-    
-    rows_by_week = {w: [] for w in weeks}
-    for r in range(2, ws_req.max_row + 1):
-        desc = ws_req.cell(row=r, column=4).value
-        semana = ws_req.cell(row=r, column=15).value
-        if desc == "CORTE" and semana in weeks:
-            rows_by_week[semana].append(r)
-            
-    for i, week in enumerate(weeks):
-        target_rows = rows_by_week[week]
-        if not target_rows:
-            print(f"Advertencia: No se encontraron filas pre-creadas para CORTE en la semana {week}.")
-            continue
-            
-        print(f"Semana {week}: pegando {len(flowers_data)} registros en {len(target_rows)} filas disponibles.")
-        
-        for idx, row_num in enumerate(target_rows):
-            if idx < len(flowers_data):
-                item = flowers_data[idx]
-                ws_req.cell(row=row_num, column=2).value = item["flor"]
-                ws_req.cell(row=row_num, column=3).value = item["color"]
-                ws_req.cell(row=row_num, column=11).value = item["qtys"][i]
-            else:
-                ws_req.cell(row=row_num, column=2).value = None
-                ws_req.cell(row=row_num, column=3).value = None
-                ws_req.cell(row=row_num, column=11).value = None
+    if os.environ.get("SHAREPOINT_UPLOAD", "true").lower() not in {"1", "true", "yes", "si", "sí"}:
+        print("Modo prueba: SHAREPOINT_UPLOAD está apagado. Deteniendo ejecución.")
+        return
 
-    print("Guardando cambios localmente...")
-    wb_req.save(req_file)
-    wb_req.close()
+    print("\nIniciando Edición en Vivo (Live Patching) en Requerimiento vs proyeccion...")
+    drive_id = item_req["parentReference"]["driveId"]
+    workbook_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item_req['id']}/workbook"
+    headers = {**graph_headers(token), "Content-Type": "application/json"}
     
-    if os.environ.get("SHAREPOINT_UPLOAD", "true").lower() in {"1", "true", "yes", "si", "sí"}:
-        print("Subiendo Requerimiento vs proyeccion a SharePoint...")
-        upload_sharepoint_file(token, item_req, req_file)
-    else:
-        print("Modo de prueba: El archivo fue modificado pero SHAREPOINT_UPLOAD está apagado. No se subió a SharePoint.")
+    print("Abriendo sesión en Excel Online...")
+    session = graph_request(
+        "POST",
+        f"{workbook_url}/createSession",
+        headers,
+        json={"persistChanges": True},
+        timeout=60,
+    ).json()
+    session_headers = {**headers, "workbook-session-id": session["id"]}
+    
+    try:
+        print("Obteniendo área de trabajo (usedRange)...")
+        used_range_res = graph_request(
+            "GET", 
+            f"{workbook_url}/worksheets/DataProy/usedRange", 
+            session_headers,
+            timeout=120
+        ).json()
+        
+        address = used_range_res.get("address", "")
+        values = used_range_res.get("values", [])
+        
+        match = re.search(r'!([A-Za-z]+)(\d+)', address)
+        start_col_str = match.group(1).upper() if match else "A"
+        start_row = int(match.group(2)) if match else 1
+        
+        start_col_idx = col_letter_to_index(start_col_str)
+        col_d_rel = col_letter_to_index("D") - start_col_idx
+        col_o_rel = col_letter_to_index("O") - start_col_idx
+        
+        rows_by_week = {w: [] for w in weeks}
+        
+        for idx, row_data in enumerate(values):
+            if len(row_data) > max(col_d_rel, col_o_rel) and col_d_rel >= 0:
+                desc = row_data[col_d_rel]
+                semana = row_data[col_o_rel]
+                if str(desc).strip().upper() == "CORTE" and semana in weeks:
+                    excel_row = start_row + idx
+                    rows_by_week[semana].append(excel_row)
+                    
+        for i, week in enumerate(weeks):
+            target_rows = sorted(rows_by_week[week])
+            if not target_rows:
+                print(f"Advertencia: No se encontraron filas CORTE para semana {week}.")
+                continue
+                
+            blocks = []
+            current_block = []
+            for r in target_rows:
+                if not current_block or r == current_block[-1] + 1:
+                    current_block.append(r)
+                else:
+                    blocks.append(current_block)
+                    current_block = [r]
+            if current_block:
+                blocks.append(current_block)
+                
+            flower_idx = 0
+            for block in blocks:
+                start_r = block[0]
+                end_r = block[-1]
+                count = len(block)
+                
+                flor_color_values = []
+                tallos_values = []
+                
+                for _ in range(count):
+                    if flower_idx < len(flowers_data):
+                        item = flowers_data[flower_idx]
+                        flor_color_values.append([item["flor"], item["color"]])
+                        tallos_values.append([item["qtys"][i]])
+                    else:
+                        flor_color_values.append(["", ""])
+                        tallos_values.append([""])
+                    flower_idx += 1
+                    
+                print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
+                address_bc = f"B{start_r}:C{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_bc}')", 
+                    session_headers, 
+                    json={"values": flor_color_values}
+                )
+                
+                address_k = f"K{start_r}:K{end_r}"
+                graph_request(
+                    "PATCH", 
+                    f"{workbook_url}/worksheets/DataProy/range(address='{address_k}')", 
+                    session_headers, 
+                    json={"values": tallos_values}
+                )
 
-    print("Proceso completado exitosamente.")
+        print("Edición en vivo finalizada con éxito.")
+    finally:
+        print("Cerrando sesión de Excel Online...")
+        try:
+            graph_request(
+                "POST",
+                f"{workbook_url}/closeSession",
+                session_headers,
+                timeout=30,
+            )
+        except Exception as exc:
+            print(f"Aviso al cerrar la sesion: {exc}")
 
 if __name__ == "__main__":
     main()
