@@ -123,26 +123,33 @@ def main():
         rows_by_week = {w: [] for w in weeks}
         
         in_corte_block = False
+        seen_compra = False
         corte_count = 0
         num_flowers = len(flowers_data)
+        total_corte_rows_needed = num_flowers * len(weeks)
         
         for idx, row_data in enumerate(values):
             if len(row_data) > col_h_rel and col_h_rel >= 0:
                 desc = str(row_data[col_h_rel]).strip().upper()
+            else:
+                desc = ""
                 
-                if desc == "CORTE" or (desc in ["", "NONE", "NULL"] and in_corte_block):
-                    in_corte_block = True
-                    
-                    if num_flowers > 0:
-                        week_idx = corte_count // num_flowers
-                        if week_idx < len(weeks):
-                            current_week = weeks[week_idx]
-                            excel_row = start_row + idx
-                            rows_by_week[current_week].append(excel_row)
-                            
-                    corte_count += 1
-                else:
-                    in_corte_block = False
+            if desc == "COMPRA":
+                seen_compra = True
+                in_corte_block = False
+            elif seen_compra and desc != "COMPRA" and corte_count < total_corte_rows_needed:
+                in_corte_block = True
+                
+                if num_flowers > 0:
+                    week_idx = corte_count // num_flowers
+                    if week_idx < len(weeks):
+                        current_week = weeks[week_idx]
+                        excel_row = start_row + idx
+                        rows_by_week[current_week].append(excel_row)
+                        
+                corte_count += 1
+            else:
+                in_corte_block = False
                     
         for i, week in enumerate(weeks):
             target_rows = sorted(rows_by_week[week])
