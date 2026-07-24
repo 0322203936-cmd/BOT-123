@@ -165,7 +165,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
-    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario'] as WorkflowKey[]).includes(workflow.key)) {
+    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq'] as WorkflowKey[]).includes(workflow.key)) {
       return true;
     }
 
