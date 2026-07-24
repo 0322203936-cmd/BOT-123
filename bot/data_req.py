@@ -214,21 +214,36 @@ def process_and_upload(report_path: Path):
         end_row = int(match.group(3)) if match else 1000
         
         if end_row >= 2:
-            print(f"Limpiando datos existentes B2:R{end_row}...")
+            print(f"Limpiando datos existentes B2:R{end_row} y Z2:Z{end_row}...")
             # Microsoft Graph clear endpoint
             graph_request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:R{end_row}')/clear", 
                           sh, json={"applyTo": "Contents"}, timeout=120)
+            graph_request("POST", f"{workbook_url}/worksheets/DataReq/range(address='Z2:Z{end_row}')/clear", 
+                          sh, json={"applyTo": "Contents"}, timeout=120)
         
         if len(new_data) > 0:
+            z_data = []
+            for row in new_data:
+                # El indice 13 corresponde a la columna O en nuestra proyección B..R
+                z_data.append([row[13]])
+                row[13] = ""
+            
             CHUNK_SIZE = 500
             for i in range(0, len(new_data), CHUNK_SIZE):
                 chunk = new_data[i : i + CHUNK_SIZE]
+                chunk_z = z_data[i : i + CHUNK_SIZE]
                 chunk_start = 2 + i
                 chunk_end = chunk_start + len(chunk) - 1
+                
                 chunk_addr = f"B{chunk_start}:R{chunk_end}"
                 print(f"Pegando chunk {chunk_addr}...")
                 graph_request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr}')", 
                               sh, json={"values": chunk}, timeout=120)
+                              
+                chunk_addr_z = f"Z{chunk_start}:Z{chunk_end}"
+                print(f"Pegando chunk {chunk_addr_z}...")
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr_z}')", 
+                              sh, json={"values": chunk_z}, timeout=120)
                               
             print("Datos copiados exitosamente a DataReq.")
     finally:
