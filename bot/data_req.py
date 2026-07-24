@@ -228,7 +228,8 @@ def process_and_upload(report_path: Path):
                 z_data.append([row[13]])
                 row[13] = ""
             
-            CHUNK_SIZE = 500
+            CHUNK_SIZE = 200
+            import time
             for i in range(0, len(new_data), CHUNK_SIZE):
                 chunk = new_data[i : i + CHUNK_SIZE]
                 chunk_z = z_data[i : i + CHUNK_SIZE]
@@ -244,6 +245,7 @@ def process_and_upload(report_path: Path):
                 print(f"Pegando chunk {chunk_addr_z}...")
                 graph_request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr_z}')", 
                               sh, json={"values": chunk_z}, timeout=120)
+                time.sleep(1)
                               
             print("Datos copiados exitosamente a DataReq.")
     finally:
