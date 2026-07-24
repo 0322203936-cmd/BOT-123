@@ -49,15 +49,6 @@ const workflows = {
     description: 'Descarga Inventario General de Posco y actualiza cuatro columnas en SharePoint.',
     schedule: 'Ejecución manual',
   },
-  ainventario: {
-    owner,
-    repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
-    branch,
-    file: 'ainventario.yml',
-    name: 'AINVENTARIO',
-    description: 'Sincroniza y suma inventario de Posco al requerimiento protegiendo la estructura.',
-    schedule: 'Ejecución manual',
-  },
   reunion: {
     owner,
     repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
@@ -74,6 +65,15 @@ const workflows = {
     file: 'data-proy.yml',
     name: 'Data Proy',
     description: 'Cruza proyecciones del Plan de Cosecha hacia Requerimientos.',
+    schedule: 'Ejecución manual',
+  },
+  ainventario: {
+    owner,
+    repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'ainventario.yml',
+    name: 'AINVENTARIO',
+    description: 'Sincroniza y suma inventario de Posco al requerimiento protegiendo la estructura.',
     schedule: 'Ejecución manual',
   },
 };
