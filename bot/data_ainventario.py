@@ -152,17 +152,30 @@ def main():
         num_current_rows = ainventario_end - ainventario_start + 1
         print(f"Filas actuales: {num_current_rows} (Desde fila {ainventario_start} hasta {ainventario_end})")
         
+        # Obtener limites de la tabla para insertar/eliminar sin error 409
+        tables_res = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables", sh)
+        col_start, col_end = "A", "Z"
+        if tables_res and tables_res.get("value") and len(tables_res["value"]) > 0:
+            table_id = tables_res["value"][0]["id"]
+            table_range = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables/{table_id}/range", sh)
+            addr = table_range.get("address", "")
+            match = re.search(r'!([A-Z]+)\d+:([A-Z]+)\d+', addr)
+            if match:
+                col_start, col_end = match.group(1), match.group(2)
+        
+        print(f"Limites de tabla detectados: {col_start}:{col_end}")
+        
         diff = num_new_rows - num_current_rows
         
         # Insertar o eliminar filas dinamicamente para proteger COMPRA y CORTE
         if diff > 0:
             print(f"Insertando {diff} filas en Excel...")
-            insert_addr = f"{ainventario_end + 1}:{ainventario_end + diff}"
+            insert_addr = f"{col_start}{ainventario_end + 1}:{col_end}{ainventario_end + diff}"
             graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{insert_addr}')/insert", 
                           sh, json={"shift": "Down"}, timeout=120)
         elif diff < 0:
             print(f"Eliminando {-diff} filas sobrantes de Excel...")
-            delete_addr = f"{ainventario_end + diff + 1}:{ainventario_end}"
+            delete_addr = f"{col_start}{ainventario_end + diff + 1}:{col_end}{ainventario_end}"
             graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{delete_addr}')/delete", 
                           sh, json={"shift": "Up"}, timeout=120)
         
