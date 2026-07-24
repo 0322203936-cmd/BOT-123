@@ -74,10 +74,8 @@ def main():
     # Asegurar que los N/A o valores nulos se traten como 0 para no romper la suma
     df['tallos_en_existencia'] = pd.to_numeric(df['tallos_en_existencia'], errors='coerce').fillna(0)
     
-    # Agrupar por flor y color sumando tallos
-    grouped = df.groupby(['flor', 'color'], as_index=False)['tallos_en_existencia'].sum()
-    # Filtrar aquellos que tienen 0 tallos para no pegar filas vacías
-    grouped = grouped[grouped['tallos_en_existencia'] > 0]
+    # Filtrar aquellos que tienen 0 tallos para no pegar filas vacías (opcional, pero útil)
+    df = df[df['tallos_en_existencia'] > 0]
     
     # Calcular semana (Calendario Sabado a Viernes)
     # Al sumar 2 dias, el Sabado se vuelve Lunes, forzando a que la semana ISO cambie justo ese dia.
@@ -86,14 +84,14 @@ def main():
     current_week = shifted_date.isocalendar()[1]
     print(f"Semana calculada (Sab-Vie): {current_week}")
     
-    num_new_rows = len(grouped)
+    num_new_rows = len(df)
     print(f"Se detectaron {num_new_rows} combinaciones unicas de flores/colores con inventario.")
     
     fcd_vals = []
     tallos_vals = []
     sem_vals = []
     
-    for _, row in grouped.iterrows():
+    for _, row in df.iterrows():
         fcd_vals.append([str(row['flor']).strip(), str(row['color']).strip(), "AINVENTARIO"])
         tallos_vals.append([int(row['tallos_en_existencia'])])
         sem_vals.append([int(current_week)])
