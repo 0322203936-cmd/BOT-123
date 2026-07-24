@@ -153,11 +153,11 @@ def main():
         print(f"Filas actuales: {num_current_rows} (Desde fila {ainventario_start} hasta {ainventario_end})")
         
         # Obtener limites de la tabla para insertar/eliminar sin error 409
-        tables_res = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables", sh)
+        tables_res = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables", sh).json()
         col_start, col_end = "A", "Z"
         if tables_res and tables_res.get("value") and len(tables_res["value"]) > 0:
             table_id = tables_res["value"][0]["id"]
-            table_range = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables/{table_id}/range", sh)
+            table_range = graph_request("GET", f"{workbook_url}/worksheets/DataProy/tables/{table_id}/range", sh).json()
             addr = table_range.get("address", "")
             match = re.search(r'!([A-Z]+)\d+:([A-Z]+)\d+', addr)
             if match:
