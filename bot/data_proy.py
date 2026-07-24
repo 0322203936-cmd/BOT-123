@@ -30,72 +30,99 @@ def main():
     item_req = resolve_sharepoint_item_by_url(token, REQ_PROY_URL)
     item_plan = resolve_sharepoint_item_by_url(token, PLAN_COSECHA_URL)
     
-    print("Descargando Plan de cosecha (solo lectura)...")
-    plan_file = download_sharepoint_file(token, item_plan, "Plan de cosecha 2026 Test_BOT.xlsx")
+    print("Abriendo sesión en vivo de Plan de Cosecha...")
+    plan_drive_id = item_plan["parentReference"]["driveId"]
+    plan_workbook_url = f"{GRAPH_URL}/drives/{plan_drive_id}/items/{item_plan['id']}/workbook"
+    headers = {**graph_headers(token), "Content-Type": "application/json"}
     
-    print(f"Abriendo {plan_file}...")
-    wb_plan = openpyxl.load_workbook(plan_file, data_only=True)
+    plan_session_res = graph_request(
+        "POST",
+        f"{plan_workbook_url}/createSession",
+        headers,
+        json={"persistChanges": False},
+        timeout=60,
+    ).json()
+    plan_session_headers = {**headers, "workbook-session-id": plan_session_res["id"]}
     
-    cosecha_sheets = [s for s in wb_plan.sheetnames if s.startswith("P Cosecha ")]
-    if not cosecha_sheets:
-        print("Error: No se encontraron hojas de 'P Cosecha'")
-        sys.exit(1)
+    try:
+        worksheets_data = graph_request("GET", f"{plan_workbook_url}/worksheets", plan_session_headers).json()
+        sheetnames = [ws["name"] for ws in worksheets_data.get("value", [])]
         
-    latest_sheet_name = sorted(cosecha_sheets)[-1]
-    ws_plan = wb_plan[latest_sheet_name]
-    print(f"Hoja detectada: {latest_sheet_name}")
-    
-    import re
-    def get_week(col):
-        val = ws_plan.cell(row=4, column=col).value
-        if val is None: return ""
-        nums = re.findall(r'\d+', str(val))
-        return int(nums[0]) if nums else str(val).strip()
-        
-    weeks = [
-        get_week(6),
-        get_week(18),
-        get_week(19),
-        get_week(20),
-        get_week(21),
-        get_week(22),
-        get_week(23),
-        get_week(24)
-    ]
-    print(f"Semanas detectadas desde los encabezados: {weeks}")
-    print(f"Semanas a procesar: {weeks}")
-
-    flowers_data = []
-    for row in range(5, ws_plan.max_row + 1):
-        flor_val = ws_plan.cell(row=row, column=1).value
-        if flor_val is not None and str(flor_val).strip().lower() == "total":
-            break
-        if not flor_val:
-            continue
+        cosecha_sheets = [s for s in sheetnames if str(s).startswith("P Cosecha ")]
+        if not cosecha_sheets:
+            print("Error: No se encontraron hojas de 'P Cosecha'")
+            sys.exit(1)
             
-        flor_real = ws_plan.cell(row=row, column=4).value
-        color_real = ws_plan.cell(row=row, column=5).value
+        latest_sheet_name = sorted(cosecha_sheets)[-1]
+        print(f"Hoja detectada (en vivo): {latest_sheet_name}")
         
-        if not flor_real:
-            continue
+        from urllib.parse import quote
+        quoted_sheet = quote(latest_sheet_name)
+        
+        print("Obteniendo datos en vivo...")
+        range_data = graph_request("GET", f"{plan_workbook_url}/worksheets('{quoted_sheet}')/range(address='A1:X1000')", plan_session_headers).json()
+        plan_values = range_data.get("values", [])
+        
+        import re
+        def get_week(col):
+            if len(plan_values) <= 3: return ""
+            if col - 1 >= len(plan_values[3]): return ""
+            val = plan_values[3][col - 1]
+            if val is None or str(val).strip() == "": return ""
+            nums = re.findall(r'\d+', str(val))
+            return int(nums[0]) if nums else str(val).strip()
             
-        qty_30 = ws_plan.cell(row=row, column=6).value or 0
-        qty_31 = ws_plan.cell(row=row, column=18).value or 0
-        qty_32 = ws_plan.cell(row=row, column=19).value or 0
-        qty_33 = ws_plan.cell(row=row, column=20).value or 0
-        qty_34 = ws_plan.cell(row=row, column=21).value or 0
-        qty_35 = ws_plan.cell(row=row, column=22).value or 0
-        qty_36 = ws_plan.cell(row=row, column=23).value or 0
-        qty_37 = ws_plan.cell(row=row, column=24).value or 0
+        weeks = [
+            get_week(6),
+            get_week(18),
+            get_week(19),
+            get_week(20),
+            get_week(21),
+            get_week(22),
+            get_week(23),
+            get_week(24)
+        ]
+        print(f"Semanas detectadas desde los encabezados: {weeks}")
+        print(f"Semanas a procesar: {weeks}")
         
-        flowers_data.append({
-            "flor": flor_real,
-            "color": color_real,
-            "qtys": [qty_30, qty_31, qty_32, qty_33, qty_34, qty_35, qty_36, qty_37]
-        })
-
-    print(f"Se extrajeron {len(flowers_data)} flores.")
-    wb_plan.close()
+        flowers_data = []
+        for row_idx in range(4, len(plan_values)):
+            row_data = plan_values[row_idx]
+            if not row_data: continue
+            
+            flor_val = row_data[0]
+            if flor_val is not None and str(flor_val).strip().lower() == "total":
+                break
+            if not flor_val:
+                continue
+                
+            flor_real = row_data[3] if len(row_data) > 3 else None
+            color_real = row_data[4] if len(row_data) > 4 else None
+            
+            if not flor_real:
+                continue
+                
+            qty_30 = row_data[5] if len(row_data) > 5 and row_data[5] is not None else 0
+            qty_31 = row_data[17] if len(row_data) > 17 and row_data[17] is not None else 0
+            qty_32 = row_data[18] if len(row_data) > 18 and row_data[18] is not None else 0
+            qty_33 = row_data[19] if len(row_data) > 19 and row_data[19] is not None else 0
+            qty_34 = row_data[20] if len(row_data) > 20 and row_data[20] is not None else 0
+            qty_35 = row_data[21] if len(row_data) > 21 and row_data[21] is not None else 0
+            qty_36 = row_data[22] if len(row_data) > 22 and row_data[22] is not None else 0
+            qty_37 = row_data[23] if len(row_data) > 23 and row_data[23] is not None else 0
+            
+            flowers_data.append({
+                "flor": flor_real,
+                "color": color_real,
+                "qtys": [qty_30, qty_31, qty_32, qty_33, qty_34, qty_35, qty_36, qty_37]
+            })
+            
+        print(f"Se extrajeron {len(flowers_data)} flores.")
+    finally:
+        try:
+            graph_request("POST", f"{plan_workbook_url}/closeSession", plan_session_headers, timeout=30)
+        except:
+            pass
 
     if os.environ.get("SHAREPOINT_UPLOAD", "true").lower() not in {"1", "true", "yes", "si", "sí"}:
         print("Modo prueba: SHAREPOINT_UPLOAD está apagado. Deteniendo ejecución.")
