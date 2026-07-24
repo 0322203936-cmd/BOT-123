@@ -278,9 +278,11 @@ def main():
             print(f"Limpiando {len(rows_to_clear)} filas residuales...")
             for block in make_blocks(rows_to_clear):
                 sr, er, cnt = block[0], block[-1], len(block)
+                patch(workbook_url, sh, f"A{sr}:D{er}", [["", "", "", ""] for _ in range(cnt)])
                 patch(workbook_url, sh, f"F{sr}:H{er}", [["", "", ""] for _ in range(cnt)])
                 patch(workbook_url, sh, f"O{sr}:O{er}", [[None] for _ in range(cnt)])
                 patch(workbook_url, sh, f"S{sr}:S{er}", [[None] for _ in range(cnt)])
+                patch(workbook_url, sh, f"U{sr}:U{er}", [[""] for _ in range(cnt)])
 
         print("Escritura finalizada con exito.")
     finally:
