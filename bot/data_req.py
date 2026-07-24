@@ -27,8 +27,11 @@ def env_flag(name: str, default: bool = False) -> bool:
 def capture(page, name: str) -> None:
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
     destination = CAPTURES_DIR / name
-    page.screenshot(path=str(destination), full_page=True)
-    print(f"Captura guardada: {destination}")
+    try:
+        page.screenshot(path=str(destination), full_page=False)
+    except Exception as e:
+        print(f"Error al tomar captura {name}: {e}")
+    print(f"Captura intentada: {destination}")
 
 def required_secret(name: str) -> str:
     value = os.environ.get(name, "").strip()
@@ -134,7 +137,7 @@ def click_visible_text(page, text: str) -> None:
     for index in range(candidates.count()):
         element = candidates.nth(index)
         if element.is_visible():
-            element.click(timeout=10_000)
+            element.click(timeout=30_000)
             return
     raise RuntimeError(f"No se encontró el control visible {text}.")
 
@@ -144,7 +147,7 @@ def export_color_filter(page) -> Path:
     page.wait_for_timeout(500)
     capture(page, "06_menu_exportar.png")
 
-    with page.expect_download(timeout=30_000) as download_info:
+    with page.expect_download(timeout=120_000) as download_info:
         click_visible_text(page, "Exportar Color filtro")
 
     download = download_info.value
