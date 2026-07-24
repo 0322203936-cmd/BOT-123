@@ -211,17 +211,18 @@ def main():
                 for _ in range(count):
                     if flower_idx < len(flowers_data):
                         item = flowers_data[flower_idx]
-                        flor_color_desc_values.append([item["flor"], item["color"], "CORTE"])
-                        tallos_values.append([item["qtys"][i]])
+                        flor_color_desc_values.append([str(item["flor"]) if item["flor"] else "", str(item["color"]) if item["color"] else "", "CORTE"])
+                        tallos_values.append([str(item["qtys"][i]) if item["qtys"][i] is not None else "0"])
                     else:
                         flor_color_desc_values.append(["", "", "CORTE"])
                         tallos_values.append([""])
-                    semana_values.append([week])
+                    semana_values.append([str(week)])
                     flower_idx += 1
                     
                 print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
                 address_fh = f"F{start_r}:H{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')/clear", session_headers, json={"applyTo": "contents"})
+                empty_fh = [["", "", ""] for _ in range(count)]
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", session_headers, json={"values": empty_fh})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
@@ -230,7 +231,8 @@ def main():
                 )
                 
                 address_o = f"O{start_r}:O{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')/clear", session_headers, json={"applyTo": "contents"})
+                empty_o = [[""] for _ in range(count)]
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", session_headers, json={"values": empty_o})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
@@ -239,7 +241,8 @@ def main():
                 )
                 
                 address_s = f"S{start_r}:S{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')/clear", session_headers, json={"applyTo": "contents"})
+                empty_s = [[""] for _ in range(count)]
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", session_headers, json={"values": empty_s})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
