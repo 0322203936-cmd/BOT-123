@@ -157,12 +157,12 @@ def main():
         # Insertar o eliminar filas dinamicamente para proteger COMPRA y CORTE
         if diff > 0:
             print(f"Insertando {diff} filas en Excel...")
-            insert_addr = f"A{ainventario_end + 1}:Z{ainventario_end + diff}"
+            insert_addr = f"{ainventario_end + 1}:{ainventario_end + diff}"
             graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{insert_addr}')/insert", 
                           sh, json={"shift": "Down"}, timeout=120)
         elif diff < 0:
             print(f"Eliminando {-diff} filas sobrantes de Excel...")
-            delete_addr = f"A{ainventario_end + diff + 1}:Z{ainventario_end}"
+            delete_addr = f"{ainventario_end + diff + 1}:{ainventario_end}"
             graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{delete_addr}')/delete", 
                           sh, json={"shift": "Up"}, timeout=120)
         
