@@ -139,11 +139,8 @@ def main():
         rows_by_week = {w: [] for w in weeks}
         rows_to_clear = []
         
-        in_corte_block = False
+        corte_start_excel_row = None
         seen_compra = False
-        corte_count = 0
-        num_flowers = len(flowers_data)
-        total_corte_rows_needed = num_flowers * len(weeks)
         
         for idx, row_data in enumerate(values):
             if len(row_data) > col_h_rel and col_h_rel >= 0:
@@ -153,24 +150,36 @@ def main():
                 
             if desc == "COMPRA":
                 seen_compra = True
-                in_corte_block = False
-            elif seen_compra and desc != "COMPRA" and corte_count < total_corte_rows_needed:
-                in_corte_block = True
+            elif seen_compra and desc != "COMPRA":
+                corte_start_excel_row = start_row + idx
+                break
                 
-                if num_flowers > 0:
-                    week_idx = corte_count // num_flowers
-                    if week_idx < len(weeks):
-                        current_week = weeks[week_idx]
-                        excel_row = start_row + idx
-                        rows_by_week[current_week].append(excel_row)
-                        
-                corte_count += 1
-            elif seen_compra and desc == "CORTE" and corte_count >= total_corte_rows_needed:
-                # Leftover CORTE row from a previous execution
-                excel_row = start_row + idx
-                rows_to_clear.append(excel_row)
+        if not corte_start_excel_row:
+            if seen_compra:
+                corte_start_excel_row = start_row + len(values)
             else:
-                in_corte_block = False
+                # Si no se encuentra COMPRA, lo ponemos al final del rango usado
+                corte_start_excel_row = start_row + len(values)
+                
+        num_flowers = len(flowers_data)
+        total_corte_rows_needed = num_flowers * len(weeks)
+        
+        # Asignar filas exactas
+        for i in range(total_corte_rows_needed):
+            week_idx = i // num_flowers
+            if week_idx < len(weeks):
+                current_week = weeks[week_idx]
+                rows_by_week[current_week].append(corte_start_excel_row + i)
+                
+        # Buscar filas residuales viejas que limpiar
+        end_of_corte_excel_row = corte_start_excel_row + total_corte_rows_needed
+        for idx, row_data in enumerate(values):
+            excel_row = start_row + idx
+            if excel_row >= end_of_corte_excel_row:
+                if len(row_data) > col_h_rel and col_h_rel >= 0:
+                    desc = str(row_data[col_h_rel]).strip().upper()
+                    if desc == "CORTE":
+                        rows_to_clear.append(excel_row)
                     
         for i, week in enumerate(weeks):
             target_rows = sorted(rows_by_week[week])
