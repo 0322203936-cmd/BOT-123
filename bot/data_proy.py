@@ -22,303 +22,253 @@ def col_letter_to_index(letter):
         idx = idx * 26 + (ord(char) - ord('A') + 1)
     return idx - 1
 
+def make_blocks(row_list):
+    blocks, cur = [], []
+    for r in sorted(row_list):
+        if not cur or r == cur[-1] + 1:
+            cur.append(r)
+        else:
+            blocks.append(cur)
+            cur = [r]
+    if cur:
+        blocks.append(cur)
+    return blocks
+
 def main():
     print("Obteniendo token de Microsoft Graph...")
     token = graph_token()
-    
+
     print("Resolviendo archivos en SharePoint...")
-    item_req = resolve_sharepoint_item_by_url(token, REQ_PROY_URL)
+    item_req  = resolve_sharepoint_item_by_url(token, REQ_PROY_URL)
     item_plan = resolve_sharepoint_item_by_url(token, PLAN_COSECHA_URL)
-    
-    print("Abriendo sesión en vivo de Plan de Cosecha...")
-    plan_drive_id = item_plan["parentReference"]["driveId"]
-    plan_workbook_url = f"{GRAPH_URL}/drives/{plan_drive_id}/items/{item_plan['id']}/workbook"
-    headers = {**graph_headers(token), "Content-Type": "application/json"}
-    
-    plan_session_res = graph_request(
-        "POST",
-        f"{plan_workbook_url}/createSession",
-        headers,
-        json={"persistChanges": False},
-        timeout=60,
+
+    # -----------------------------------------------------------------------
+    # PASO 1: Leer Plan de Cosecha en vivo via Graph API
+    # -----------------------------------------------------------------------
+    print("Abriendo sesion en vivo de Plan de Cosecha...")
+    plan_drive_id      = item_plan["parentReference"]["driveId"]
+    plan_workbook_url  = f"{GRAPH_URL}/drives/{plan_drive_id}/items/{item_plan['id']}/workbook"
+    headers            = {**graph_headers(token), "Content-Type": "application/json"}
+
+    plan_sess = graph_request(
+        "POST", f"{plan_workbook_url}/createSession", headers,
+        json={"persistChanges": False}, timeout=60,
     ).json()
-    plan_session_headers = {**headers, "workbook-session-id": plan_session_res["id"]}
-    
+    psh = {**headers, "workbook-session-id": plan_sess["id"]}
+
     try:
-        worksheets_data = graph_request("GET", f"{plan_workbook_url}/worksheets", plan_session_headers).json()
-        sheetnames = [ws["name"] for ws in worksheets_data.get("value", [])]
-        
+        ws_list    = graph_request("GET", f"{plan_workbook_url}/worksheets", psh).json()
+        sheetnames = [ws["name"] for ws in ws_list.get("value", [])]
+
         cosecha_sheets = [s for s in sheetnames if str(s).startswith("P Cosecha ")]
         if not cosecha_sheets:
             print("Error: No se encontraron hojas de 'P Cosecha'")
             sys.exit(1)
-            
+
         latest_sheet_name = sorted(cosecha_sheets)[-1]
         print(f"Hoja detectada (en vivo): {latest_sheet_name}")
-        
+
         from urllib.parse import quote
         quoted_sheet = quote(latest_sheet_name)
-        
+
         print("Obteniendo datos en vivo...")
-        range_data = graph_request("GET", f"{plan_workbook_url}/worksheets('{quoted_sheet}')/range(address='A1:X1000')", plan_session_headers).json()
+        range_data  = graph_request("GET", f"{plan_workbook_url}/worksheets('{quoted_sheet}')/range(address='A1:X1000')", psh).json()
         plan_values = range_data.get("values", [])
-        
-        import re
+
         def get_week(col):
-            if len(plan_values) <= 3: return ""
-            if col - 1 >= len(plan_values[3]): return ""
+            if len(plan_values) <= 3:
+                return ""
+            if col - 1 >= len(plan_values[3]):
+                return ""
             val = plan_values[3][col - 1]
-            if val is None or str(val).strip() == "": return ""
+            if val is None or str(val).strip() == "":
+                return ""
             nums = re.findall(r'\d+', str(val))
             return int(nums[0]) if nums else str(val).strip()
-            
-        weeks = [
-            get_week(6),
-            get_week(18),
-            get_week(19),
-            get_week(20),
-            get_week(21),
-            get_week(22),
-            get_week(23),
-            get_week(24)
-        ]
+
+        weeks = [get_week(6), get_week(18), get_week(19), get_week(20),
+                 get_week(21), get_week(22), get_week(23), get_week(24)]
         print(f"Semanas detectadas desde los encabezados: {weeks}")
-        print(f"Semanas a procesar: {weeks}")
-        
+
         flowers_data = []
         for row_idx in range(4, len(plan_values)):
             row_data = plan_values[row_idx]
-            if not row_data: continue
-            
+            if not row_data:
+                continue
             flor_val = row_data[0]
             if flor_val is not None and str(flor_val).strip().lower() == "total":
                 break
             if not flor_val:
                 continue
-                
-            flor_real = row_data[3] if len(row_data) > 3 else None
+            flor_real  = row_data[3] if len(row_data) > 3 else None
             color_real = row_data[4] if len(row_data) > 4 else None
-            
             if not flor_real:
                 continue
-                
-            qty_30 = row_data[5] if len(row_data) > 5 and row_data[5] is not None else 0
-            qty_31 = row_data[17] if len(row_data) > 17 and row_data[17] is not None else 0
-            qty_32 = row_data[18] if len(row_data) > 18 and row_data[18] is not None else 0
-            qty_33 = row_data[19] if len(row_data) > 19 and row_data[19] is not None else 0
-            qty_34 = row_data[20] if len(row_data) > 20 and row_data[20] is not None else 0
-            qty_35 = row_data[21] if len(row_data) > 21 and row_data[21] is not None else 0
-            qty_36 = row_data[22] if len(row_data) > 22 and row_data[22] is not None else 0
-            qty_37 = row_data[23] if len(row_data) > 23 and row_data[23] is not None else 0
-            
             flowers_data.append({
-                "flor": flor_real,
+                "flor":  flor_real,
                 "color": color_real,
-                "qtys": [qty_30, qty_31, qty_32, qty_33, qty_34, qty_35, qty_36, qty_37]
+                "qtys":  [
+                    row_data[5]  if len(row_data) > 5  and row_data[5]  is not None else 0,
+                    row_data[17] if len(row_data) > 17 and row_data[17] is not None else 0,
+                    row_data[18] if len(row_data) > 18 and row_data[18] is not None else 0,
+                    row_data[19] if len(row_data) > 19 and row_data[19] is not None else 0,
+                    row_data[20] if len(row_data) > 20 and row_data[20] is not None else 0,
+                    row_data[21] if len(row_data) > 21 and row_data[21] is not None else 0,
+                    row_data[22] if len(row_data) > 22 and row_data[22] is not None else 0,
+                    row_data[23] if len(row_data) > 23 and row_data[23] is not None else 0,
+                ],
             })
-            
+
         print(f"Se extrajeron {len(flowers_data)} flores.")
     finally:
         try:
-            graph_request("POST", f"{plan_workbook_url}/closeSession", plan_session_headers, timeout=30)
-        except:
+            graph_request("POST", f"{plan_workbook_url}/closeSession", psh, timeout=30)
+        except Exception:
             pass
 
     if os.environ.get("SHAREPOINT_UPLOAD", "true").lower() not in {"1", "true", "yes", "si", "sí"}:
-        print("Modo prueba: SHAREPOINT_UPLOAD está apagado. Deteniendo ejecución.")
+        print("Modo prueba: SHAREPOINT_UPLOAD está apagado. Deteniendo ejecucion.")
         return
 
-    print("\nIniciando Edición en Vivo (Live Patching) en Requerimiento vs proyeccion...")
-    drive_id = item_req["parentReference"]["driveId"]
+    print("\nIniciando Edicion en Vivo en Requerimiento vs proyeccion...")
+    drive_id     = item_req["parentReference"]["driveId"]
     workbook_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item_req['id']}/workbook"
-    headers = {**graph_headers(token), "Content-Type": "application/json"}
-    
-    print("Abriendo sesión en Excel Online...")
-    session = graph_request(
-        "POST",
-        f"{workbook_url}/createSession",
-        headers,
-        json={"persistChanges": True},
-        timeout=60,
+
+    # -----------------------------------------------------------------------
+    # SESION 1: leer qué filas son CORTE y BORRAR columnas O y S
+    # -----------------------------------------------------------------------
+    print("Sesion 1/2: Leyendo datos y borrando O y S de todas las filas CORTE...")
+    session1 = graph_request(
+        "POST", f"{workbook_url}/createSession", headers,
+        json={"persistChanges": True}, timeout=60,
     ).json()
-    session_headers = {**headers, "workbook-session-id": session["id"]}
-    
+    s1h = {**headers, "workbook-session-id": session1["id"]}
+
+    rows_by_week          = {w: [] for w in weeks}
+    rows_to_clear         = []
+    corte_start_excel_row = None
+
     try:
-        print("Obteniendo área de trabajo (usedRange)...")
-        used_range_res = graph_request(
-            "GET", 
-            f"{workbook_url}/worksheets/DataProy/usedRange", 
-            session_headers,
-            timeout=120
-        ).json()
-        
-        address = used_range_res.get("address", "")
-        values = used_range_res.get("values", [])
-        
-        match = re.search(r'!([A-Za-z]+)(\d+)', address)
-        start_col_str = match.group(1).upper() if match else "A"
-        start_row = int(match.group(2)) if match else 1
-        
+        used      = graph_request("GET", f"{workbook_url}/worksheets/DataProy/usedRange", s1h, timeout=120).json()
+        address   = used.get("address", "")
+        values    = used.get("values", [])
+
+        m             = re.search(r'!([A-Za-z]+)(\d+)', address)
+        start_col_str = m.group(1).upper() if m else "A"
+        start_row     = int(m.group(2))    if m else 1
         start_col_idx = col_letter_to_index(start_col_str)
-        col_h_rel = col_letter_to_index("H") - start_col_idx
-        col_s_rel = col_letter_to_index("S") - start_col_idx
-        
-        rows_by_week = {w: [] for w in weeks}
-        rows_to_clear = []
-        
-        corte_start_excel_row = None
+        col_h_rel     = col_letter_to_index("H") - start_col_idx
+
         seen_compra = False
-        
         for idx, row_data in enumerate(values):
-            if len(row_data) > col_h_rel and col_h_rel >= 0:
-                desc = str(row_data[col_h_rel]).strip().upper()
-            else:
-                desc = ""
-                
+            desc = str(row_data[col_h_rel]).strip().upper() if (col_h_rel >= 0 and len(row_data) > col_h_rel) else ""
             if desc == "COMPRA":
                 seen_compra = True
             elif seen_compra and desc != "COMPRA":
                 corte_start_excel_row = start_row + idx
                 break
-                
+
         if not corte_start_excel_row:
-            if seen_compra:
-                corte_start_excel_row = start_row + len(values)
-            else:
-                # Si no se encuentra COMPRA, lo ponemos al final del rango usado
-                corte_start_excel_row = start_row + len(values)
-                
-        num_flowers = len(flowers_data)
-        total_corte_rows_needed = num_flowers * len(weeks)
-        
-        # Asignar filas exactas
-        for i in range(total_corte_rows_needed):
+            corte_start_excel_row = start_row + len(values)
+
+        num_flowers  = len(flowers_data)
+        total_needed = num_flowers * len(weeks)
+
+        for i in range(total_needed):
             week_idx = i // num_flowers
             if week_idx < len(weeks):
-                current_week = weeks[week_idx]
-                rows_by_week[current_week].append(corte_start_excel_row + i)
-                
-        # Buscar filas residuales viejas que limpiar
-        end_of_corte_excel_row = corte_start_excel_row + total_corte_rows_needed
+                rows_by_week[weeks[week_idx]].append(corte_start_excel_row + i)
+
+        end_row = corte_start_excel_row + total_needed
         for idx, row_data in enumerate(values):
             excel_row = start_row + idx
-            if excel_row >= end_of_corte_excel_row:
-                if len(row_data) > col_h_rel and col_h_rel >= 0:
-                    desc = str(row_data[col_h_rel]).strip().upper()
-                    if desc == "CORTE":
-                        rows_to_clear.append(excel_row)
-                    
+            if excel_row >= end_row:
+                desc = str(row_data[col_h_rel]).strip().upper() if (col_h_rel >= 0 and len(row_data) > col_h_rel) else ""
+                if desc == "CORTE":
+                    rows_to_clear.append(excel_row)
+
+        # Borrar O y S en TODAS las filas CORTE (nuevas + residuales)
+        all_corte = sorted(
+            set(r for rows in rows_by_week.values() for r in rows) | set(rows_to_clear)
+        )
+        print(f"Borrando O y S en {len(all_corte)} filas de CORTE...")
+        for block in make_blocks(all_corte):
+            sr, er, cnt = block[0], block[-1], len(block)
+            graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='O{sr}:O{er}')",
+                          s1h, json={"values": [[""] for _ in range(cnt)]})
+            graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='S{sr}:S{er}')",
+                          s1h, json={"values": [[""] for _ in range(cnt)]})
+
+    finally:
+        print("Cerrando Sesion 1...")
+        try:
+            graph_request("POST", f"{workbook_url}/closeSession", s1h, timeout=30)
+        except Exception as exc:
+            print(f"Aviso sesion 1: {exc}")
+
+    # -----------------------------------------------------------------------
+    # SESION 2: escribir los valores nuevos (celdas O y S ya estan vacias)
+    # -----------------------------------------------------------------------
+    print("Sesion 2/2: Escribiendo datos nuevos...")
+    session2 = graph_request(
+        "POST", f"{workbook_url}/createSession", headers,
+        json={"persistChanges": True}, timeout=60,
+    ).json()
+    s2h = {**headers, "workbook-session-id": session2["id"]}
+
+    try:
         for i, week in enumerate(weeks):
             target_rows = sorted(rows_by_week[week])
             if not target_rows:
-                print(f"Advertencia: No se encontraron filas CORTE para semana {week}.")
+                print(f"Advertencia: No hay filas para semana {week}.")
                 continue
-                
-            blocks = []
-            current_block = []
-            for r in target_rows:
-                if not current_block or r == current_block[-1] + 1:
-                    current_block.append(r)
-                else:
-                    blocks.append(current_block)
-                    current_block = [r]
-            if current_block:
-                blocks.append(current_block)
-                
+
             flower_idx = 0
-            for block in blocks:
-                start_r = block[0]
-                end_r = block[-1]
-                count = len(block)
-                
-                flor_color_desc_values = []
-                tallos_values = []
-                semana_values = []
-                
+            for block in make_blocks(target_rows):
+                sr, er, count = block[0], block[-1], len(block)
+                fcd_vals, tallos_vals, sem_vals = [], [], []
+
                 for _ in range(count):
                     if flower_idx < len(flowers_data):
                         item = flowers_data[flower_idx]
-                        flor_color_desc_values.append([str(item["flor"]) if item["flor"] else "", str(item["color"]) if item["color"] else "", "CORTE"])
-                        tallos_values.append([str(item["qtys"][i]) if item["qtys"][i] is not None else "0"])
+                        fcd_vals.append([
+                            str(item["flor"])  if item["flor"]  else "",
+                            str(item["color"]) if item["color"] else "",
+                            "CORTE",
+                        ])
+                        tallos_vals.append([str(item["qtys"][i]) if item["qtys"][i] is not None else "0"])
                     else:
-                        flor_color_desc_values.append(["", "", "CORTE"])
-                        tallos_values.append([""])
-                    semana_values.append([str(week)])
+                        fcd_vals.append(["", "", "CORTE"])
+                        tallos_vals.append([""])
+                    sem_vals.append([str(week)])
                     flower_idx += 1
-                    
-                print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
-                address_fh = f"F{start_r}:H{end_r}"
-                empty_fh = [["", "", ""] for _ in range(count)]
-                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", session_headers, json={"values": empty_fh})
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
-                    session_headers, 
-                    json={"values": flor_color_desc_values}
-                )
-                
-                address_o = f"O{start_r}:O{end_r}"
-                empty_o = [[""] for _ in range(count)]
-                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", session_headers, json={"values": empty_o})
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
-                    session_headers, 
-                    json={"values": tallos_values}
-                )
-                
-                address_s = f"S{start_r}:S{end_r}"
-                empty_s = [[""] for _ in range(count)]
-                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", session_headers, json={"values": empty_s})
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
-                    session_headers, 
-                    json={"values": semana_values}
-                )
+
+                print(f"Semana {week}: Escribiendo filas {sr}:{er}...")
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='F{sr}:H{er}')",
+                              s2h, json={"values": fcd_vals})
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='O{sr}:O{er}')",
+                              s2h, json={"values": tallos_vals})
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='S{sr}:S{er}')",
+                              s2h, json={"values": sem_vals})
 
         if rows_to_clear:
-            print(f"Limpiando {len(rows_to_clear)} filas residuales de CORTE de ejecuciones anteriores...")
-            clear_blocks = []
-            current_clear_block = []
-            for r in sorted(rows_to_clear):
-                if not current_clear_block:
-                    current_clear_block.append(r)
-                elif r == current_clear_block[-1] + 1:
-                    current_clear_block.append(r)
-                else:
-                    clear_blocks.append(current_clear_block)
-                    current_clear_block = [r]
-            if current_clear_block:
-                clear_blocks.append(current_clear_block)
-                
-            for block in clear_blocks:
-                start_r = block[0]
-                end_r = block[-1]
-                
-                print(f"Limpiando bloque {start_r}:{end_r}")
-                
-                address_fh = f"F{start_r}:H{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')/clear", session_headers, json={"applyTo": "contents"})
-                
-                address_o = f"O{start_r}:O{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')/clear", session_headers, json={"applyTo": "contents"})
-                
-                address_s = f"S{start_r}:S{end_r}"
-                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')/clear", session_headers, json={"applyTo": "contents"})
+            print(f"Limpiando {len(rows_to_clear)} filas residuales...")
+            for block in make_blocks(rows_to_clear):
+                sr, er, cnt = block[0], block[-1], len(block)
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='F{sr}:H{er}')",
+                              s2h, json={"values": [["", "", ""] for _ in range(cnt)]})
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='O{sr}:O{er}')",
+                              s2h, json={"values": [[""] for _ in range(cnt)]})
+                graph_request("PATCH", f"{workbook_url}/worksheets/DataProy/range(address='S{sr}:S{er}')",
+                              s2h, json={"values": [[""] for _ in range(cnt)]})
 
-        print("Edición en vivo finalizada con éxito.")
+        print("Edicion en vivo finalizada con exito.")
     finally:
-        print("Cerrando sesión de Excel Online...")
+        print("Cerrando Sesion 2...")
         try:
-            graph_request(
-                "POST",
-                f"{workbook_url}/closeSession",
-                session_headers,
-                timeout=30,
-            )
+            graph_request("POST", f"{workbook_url}/closeSession", s2h, timeout=30)
         except Exception as exc:
-            print(f"Aviso al cerrar la sesion: {exc}")
+            print(f"Aviso sesion 2: {exc}")
 
 if __name__ == "__main__":
     main()
