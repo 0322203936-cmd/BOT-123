@@ -83,6 +83,16 @@ def main():
     psh = {**headers, "workbook-session-id": plan_sess["id"]}
 
     try:
+        # Forzar que Excel Online vacíe su caché y consolide los cambios recientes
+        print("Forzando recalculo para obtener datos frescos...")
+        try:
+            graph_request(
+                "POST", f"{plan_workbook_url}/application/calculate",
+                psh, json={"calculationType": "Full"}, timeout=60,
+            )
+        except Exception as calc_err:
+            print(f"Aviso calculate: {calc_err} (continuando de todas formas)")
+
         ws_list    = graph_request("GET", f"{plan_workbook_url}/worksheets", psh).json()
         sheetnames = [ws["name"] for ws in ws_list.get("value", [])]
 
