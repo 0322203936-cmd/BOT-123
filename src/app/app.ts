@@ -4,7 +4,7 @@ import { Component, computed, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
