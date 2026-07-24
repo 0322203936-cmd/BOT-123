@@ -42,7 +42,7 @@ def patch(workbook_url, sh, addr, values):
 
 
 def clear_and_write(workbook_url, sh, sr, er, cnt,
-                    fcd_vals, tallos_vals, sem_vals):
+                    abcd_vals, fcd_vals, tallos_vals, sem_vals, u_vals):
     """
     For each block of rows:
       1. Overwrite O and S with None (null) to clear numeric cells.
@@ -55,9 +55,11 @@ def clear_and_write(workbook_url, sh, sr, er, cnt,
     patch(workbook_url, sh, f"S{sr}:S{er}", [[None] for _ in range(cnt)])
 
     # Step B – write the new values (numbers, not strings)
+    patch(workbook_url, sh, f"A{sr}:D{er}", abcd_vals)
     patch(workbook_url, sh, f"F{sr}:H{er}", fcd_vals)
     patch(workbook_url, sh, f"O{sr}:O{er}", tallos_vals)
     patch(workbook_url, sh, f"S{sr}:S{er}", sem_vals)
+    patch(workbook_url, sh, f"U{sr}:U{er}", u_vals)
 
 
 def main():
@@ -239,7 +241,7 @@ def main():
             flower_idx = 0
             for block in make_blocks(target_rows):
                 sr, er, count = block[0], block[-1], len(block)
-                fcd_vals, tallos_vals, sem_vals = [], [], []
+                abcd_vals, fcd_vals, tallos_vals, sem_vals, u_vals = [], [], [], [], []
 
                 for _ in range(count):
                     if flower_idx < len(flowers_data):
@@ -257,15 +259,19 @@ def main():
                     else:
                         fcd_vals.append(["", "", "CORTE"])
                         tallos_vals.append([0])
+                    
+                    abcd_vals.append(["Proyeccion", "CORTE", "CORTE", "CORTE"])
                     try:
                         sem_vals.append([int(week)])
                     except (ValueError, TypeError):
                         sem_vals.append([week])
+                    
+                    u_vals.append(["CORTE"])
                     flower_idx += 1
 
                 print(f"Semana {week}: null-clear + write filas {sr}:{er}...")
                 clear_and_write(workbook_url, sh, sr, er, count,
-                                fcd_vals, tallos_vals, sem_vals)
+                                abcd_vals, fcd_vals, tallos_vals, sem_vals, u_vals)
 
         # Limpiar filas residuales viejas
         if rows_to_clear:
