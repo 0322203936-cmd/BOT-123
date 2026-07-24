@@ -43,6 +43,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: capturas-posco
-          path: artifacts/inventario/capturas/*.png
+          name: evidencias-posco
+          path: |
+            artifacts/inventario/capturas/*.png
+            artifacts/inventario/reportes/*.xlsx
           retention-days: 7
