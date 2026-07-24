@@ -76,6 +76,15 @@ const workflows = {
     description: 'Sincroniza y suma inventario de Posco al requerimiento protegiendo la estructura.',
     schedule: 'Ejecución manual',
   },
+  dataReq: {
+    owner,
+    repo: process.env.DATA_REQ_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'data-req.yml',
+    name: 'Data Req',
+    description: 'Descarga reporte de Posco y lo pega en la hoja DataReq omitiendo columna N.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();

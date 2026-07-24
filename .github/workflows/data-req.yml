@@ -1,0 +1,50 @@
+name: Bot Data Req
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: data-req-sharepoint
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  datareq:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Ejecutar Bot Data Req
+        env:
+          POSCO_USER: ${{ secrets.POSCO_USER }}
+          POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+        run: python -u bot/data_req.py
+
+      - name: Guardar capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-posco-datareq
+          path: |
+            artifacts/capturas/*.png
+            artifacts/reportes/*.xlsx
+          retention-days: 7
