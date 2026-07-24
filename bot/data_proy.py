@@ -236,11 +236,18 @@ def main():
                             str(item["color"]) if item["color"] else "",
                             "CORTE",
                         ])
-                        tallos_vals.append([str(item["qtys"][i]) if item["qtys"][i] is not None else "0"])
+                        qty_val = item["qtys"][i]
+                        try:
+                            tallos_vals.append([int(qty_val) if qty_val is not None else 0])
+                        except (ValueError, TypeError):
+                            tallos_vals.append([0])
                     else:
                         fcd_vals.append(["", "", "CORTE"])
                         tallos_vals.append([""])
-                    sem_vals.append([str(week)])
+                    try:
+                        sem_vals.append([int(week)])
+                    except (ValueError, TypeError):
+                        sem_vals.append([week])
                     flower_idx += 1
 
                 print(f"Semana {week}: Escribiendo filas {sr}:{er}...")
