@@ -78,7 +78,7 @@ def main():
 
     plan_sess = graph_request(
         "POST", f"{plan_workbook_url}/createSession", headers,
-        json={"persistChanges": False}, timeout=60,
+        json={"persistChanges": True}, timeout=60,
     ).json()
     psh = {**headers, "workbook-session-id": plan_sess["id"]}
 
