@@ -221,6 +221,7 @@ def main():
                     
                 print(f"Semana {week}: Escribiendo bloque filas {start_r}:{end_r}...")
                 address_fh = f"F{start_r}:H{end_r}"
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')/clear", session_headers, json={"applyTo": "contents"})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
@@ -229,6 +230,7 @@ def main():
                 )
                 
                 address_o = f"O{start_r}:O{end_r}"
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')/clear", session_headers, json={"applyTo": "contents"})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
@@ -237,6 +239,7 @@ def main():
                 )
                 
                 address_s = f"S{start_r}:S{end_r}"
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')/clear", session_headers, json={"applyTo": "contents"})
                 graph_request(
                     "PATCH", 
                     f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
@@ -262,36 +265,17 @@ def main():
             for block in clear_blocks:
                 start_r = block[0]
                 end_r = block[-1]
-                count = len(block)
-                
-                empty_fh = [["", "", ""] for _ in range(count)]
-                empty_single = [[""] for _ in range(count)]
                 
                 print(f"Limpiando bloque {start_r}:{end_r}")
                 
                 address_fh = f"F{start_r}:H{end_r}"
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')", 
-                    session_headers, 
-                    json={"values": empty_fh}
-                )
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_fh}')/clear", session_headers, json={"applyTo": "contents"})
                 
                 address_o = f"O{start_r}:O{end_r}"
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')", 
-                    session_headers, 
-                    json={"values": empty_single}
-                )
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_o}')/clear", session_headers, json={"applyTo": "contents"})
                 
                 address_s = f"S{start_r}:S{end_r}"
-                graph_request(
-                    "PATCH", 
-                    f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')", 
-                    session_headers, 
-                    json={"values": empty_single}
-                )
+                graph_request("POST", f"{workbook_url}/worksheets/DataProy/range(address='{address_s}')/clear", session_headers, json={"applyTo": "contents"})
 
         print("Edición en vivo finalizada con éxito.")
     finally:
