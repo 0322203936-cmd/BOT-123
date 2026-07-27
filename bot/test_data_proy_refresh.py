@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 requests_stub = types.ModuleType("requests")
 requests_stub.Response = object
@@ -8,6 +9,7 @@ requests_stub.request = lambda *args, **kwargs: None
 sys.modules.setdefault("requests", requests_stub)
 
 from data_proy_refresh import combine_like_power_query, refresh_weeks_pivot
+from data_proy import clear_and_write
 
 
 class FakeResponse:
@@ -77,6 +79,34 @@ class DataProyRefreshTests(unittest.TestCase):
         )
         self.assertEqual(calls[1][0], "POST")
         self.assertTrue(calls[1][1].endswith("/PivotTable6/refresh"))
+
+    def test_data_proy_writes_firme_in_column_u(self) -> None:
+        with patch("data_proy.graph_request") as request:
+            clear_and_write(
+                "https://graph/workbook",
+                {},
+                2,
+                3,
+                2,
+                [["Proyeccion", "CORTE", "CORTE", "CORTE"]] * 2,
+                [["ASTER", "WHITE", "CORTE"]] * 2,
+                [[100], [200]],
+                [[31], [31]],
+                [["FIRME"], ["FIRME"]],
+            )
+
+        urls_and_values = [
+            (call.args[1], call.kwargs["json"]["values"])
+            for call in request.call_args_list
+        ]
+        self.assertIn(
+            (
+                "https://graph/workbook/worksheets/DataProy/"
+                "range(address='U2:U3')",
+                [["FIRME"], ["FIRME"]],
+            ),
+            urls_and_values,
+        )
 
 
 if __name__ == "__main__":
