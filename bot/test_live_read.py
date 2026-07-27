@@ -9,7 +9,7 @@ from sharepoint_sync import (
 )
 from excel_range_sync import graph_request
 
-PLAN_COSECHA_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B7B0A3464-AB7B-400A-A0E6-5BC92E23CE3E%7D&file=Plan%20de%20cosecha%202026%20Test.xlsx&action=default&mobileredirect=true"
+PLAN_COSECHA_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/DocCampos/_layouts/15/Doc.aspx?sourcedoc=%7BB574F211-4861-4031-8C8E-03448B593DA2%7D&file=Plan%20de%20cosecha%202025.xlsx&action=default&mobileredirect=true"
 
 def main():
     token = graph_token()
