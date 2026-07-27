@@ -78,7 +78,7 @@ class DataProyRefreshTests(unittest.TestCase):
             )
         )
 
-    def test_refreshes_only_expected_pivot(self) -> None:
+    def test_refreshes_all_pivots_on_expected_sheet_and_recalculates(self) -> None:
         calls = []
 
         def fake_graph_request(method, url, headers, **kwargs):
@@ -89,7 +89,7 @@ class DataProyRefreshTests(unittest.TestCase):
 
         refresh_weeks_pivot(fake_graph_request, "https://graph/workbook", {})
 
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][0], "GET")
         self.assertTrue(
             calls[0][1].endswith(
@@ -98,7 +98,13 @@ class DataProyRefreshTests(unittest.TestCase):
             )
         )
         self.assertEqual(calls[1][0], "POST")
-        self.assertTrue(calls[1][1].endswith("/PivotTable6/refresh"))
+        self.assertTrue(calls[1][1].endswith("/pivotTables/refreshAll"))
+        self.assertEqual(calls[2][0], "POST")
+        self.assertTrue(calls[2][1].endswith("/application/calculate"))
+        self.assertEqual(
+            calls[2][2]["json"],
+            {"calculationType": "Full"},
+        )
 
     def test_data_proy_writes_firme_in_column_u(self) -> None:
         with patch("data_proy.graph_request") as request:

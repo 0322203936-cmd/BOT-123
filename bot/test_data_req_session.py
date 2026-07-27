@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 requests_stub = types.ModuleType("requests")
 requests_stub.Response = object
@@ -18,6 +19,7 @@ from data_req import (
     DATA_REQ_CHUNK_SIZE,
     ResilientWorkbookSession,
     excel_rows_equal,
+    refresh_data_req_outputs,
 )
 
 
@@ -107,6 +109,55 @@ class DataReqSessionTests(unittest.TestCase):
                 "https://graph.example/workbook/worksheets/DataReq/range",
                 json={"values": [[1]]},
             )
+
+    def test_refreshes_append_and_pivot_in_separate_sessions(self):
+        sessions = []
+        sleeps = []
+
+        class FakeSession:
+            def __init__(self, workbook_url, headers):
+                self.workbook_url = workbook_url
+                self.session_headers = None
+                self.opened = False
+                self.closed = False
+                sessions.append(self)
+
+            def open(self):
+                self.opened = True
+                self.session_headers = {
+                    "workbook-session-id": f"session-{len(sessions)}"
+                }
+
+            def close(self):
+                self.closed = True
+
+            def request(self, method, url, **kwargs):
+                return FakeResponse()
+
+        with (
+            patch("data_req.rebuild_append1_output", return_value=42) as append,
+            patch("data_req.refresh_weeks_pivot") as pivot,
+        ):
+            rows = refresh_data_req_outputs(
+                "https://graph.example/workbook",
+                {"Authorization": "Bearer token"},
+                session_factory=FakeSession,
+                sleep_func=sleeps.append,
+            )
+
+        self.assertEqual(rows, 42)
+        self.assertEqual(len(sessions), 2)
+        self.assertTrue(all(session.opened for session in sessions))
+        self.assertTrue(all(session.closed for session in sessions))
+        self.assertEqual(
+            append.call_args.args[2]["workbook-session-id"],
+            "session-1",
+        )
+        self.assertEqual(
+            pivot.call_args.args[2]["workbook-session-id"],
+            "session-2",
+        )
+        self.assertEqual(sleeps, [5])
 
 
 if __name__ == "__main__":

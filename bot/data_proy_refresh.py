@@ -253,18 +253,25 @@ def refresh_weeks_pivot(
         "POST",
         (
             f"{workbook_url}/worksheets/{sheet}/"
-            f"pivotTables/{pivot}/refresh"
+            "pivotTables/refreshAll"
         ),
         headers,
         timeout=120,
     )
+    graph_request(
+        "POST",
+        f"{workbook_url}/application/calculate",
+        headers,
+        json={"calculationType": "Full"},
+        timeout=120,
+    )
     print(
-        f"PIVOT_REFRESH_OK hoja={PIVOT_SHEET} tabla={PIVOT_TABLE}",
+        f"PIVOT_REFRESH_ALL_OK hoja={PIVOT_SHEET} tabla={PIVOT_TABLE}",
         flush=True,
     )
 
 
-def refresh_data_proy_outputs(
+def rebuild_append1_output(
     graph_request: GraphRequest,
     workbook_url: str,
     headers: dict[str, str],
@@ -278,5 +285,14 @@ def refresh_data_proy_outputs(
         json={"calculationType": "Full"},
         timeout=120,
     )
+    return rows
+
+
+def refresh_data_proy_outputs(
+    graph_request: GraphRequest,
+    workbook_url: str,
+    headers: dict[str, str],
+) -> int:
+    rows = rebuild_append1_output(graph_request, workbook_url, headers)
     refresh_weeks_pivot(graph_request, workbook_url, headers)
     return rows
