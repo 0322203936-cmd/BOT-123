@@ -17,6 +17,100 @@ CAPTURES_DIR = Path("artifacts/capturas")
 REPORTS_DIR = Path("artifacts/reportes")
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BB6111299-1373-4717-A2B7-3D507AD77A8A%7D&file=Requerimiento%20vs%20proyeccion.xlsm&action=default&mobileredirect=true"
+DATA_REQ_CHUNK_SIZE = 100
+
+
+def excel_rows_equal(expected, actual) -> bool:
+    width = max(len(expected), len(actual))
+    expected_values = list(expected) + [""] * (width - len(expected))
+    actual_values = list(actual) + [""] * (width - len(actual))
+
+    def normalized(value):
+        return "" if value is None else value
+
+    return all(
+        normalized(expected_value) == normalized(actual_value)
+        for expected_value, actual_value in zip(expected_values, actual_values)
+    )
+
+
+class ResilientWorkbookSession:
+    def __init__(self, workbook_url, headers, request_func=graph_request):
+        self.workbook_url = workbook_url
+        self.base_headers = headers
+        self.request_func = request_func
+        self.session_headers = None
+
+    def open(self):
+        session = self.request_func(
+            "POST",
+            f"{self.workbook_url}/createSession",
+            self.base_headers,
+            json={"persistChanges": True},
+            timeout=60,
+        ).json()
+        session_id = session.get("id")
+        if not session_id:
+            raise RuntimeError("Microsoft Graph no devolvio un identificador de sesion.")
+        self.session_headers = {
+            **self.base_headers,
+            "workbook-session-id": session_id,
+        }
+        return self.session_headers
+
+    @staticmethod
+    def _session_is_invalid(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            "target session is invalid" in message
+            or "invalidsession" in message
+            or "invalid session" in message
+        )
+
+    def close(self):
+        if not self.session_headers:
+            return
+        try:
+            self.request_func(
+                "POST",
+                f"{self.workbook_url}/closeSession",
+                self.session_headers,
+                timeout=30,
+            )
+        except Exception:
+            pass
+        finally:
+            self.session_headers = None
+
+    def renew(self):
+        self.close()
+        print(
+            "La sesion de Excel fue invalidada; abriendo una nueva "
+            "y repitiendo el bloque pendiente...",
+            flush=True,
+        )
+        self.open()
+
+    def request(self, method, url, **kwargs):
+        if not self.session_headers:
+            self.open()
+        try:
+            return self.request_func(
+                method,
+                url,
+                self.session_headers,
+                **kwargs,
+            )
+        except RuntimeError as error:
+            if not self._session_is_invalid(error):
+                raise
+            self.renew()
+            return self.request_func(
+                method,
+                url,
+                self.session_headers,
+                **kwargs,
+            )
 
 def env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -200,15 +294,12 @@ def process_and_upload(report_path: Path):
     headers = {**graph_headers(token), "Content-Type": "application/json"}
     
     print("Abriendo sesion persistente en DataReq...")
-    sess = graph_request(
-        "POST", f"{workbook_url}/createSession", headers,
-        json={"persistChanges": True}, timeout=60,
-    ).json()
-    sh = {**headers, "workbook-session-id": sess["id"]}
+    session = ResilientWorkbookSession(workbook_url, headers)
+    session.open()
     
     try:
         print("Buscando límite de datos previos en DataReq...")
-        used = graph_request("GET", f"{workbook_url}/worksheets/DataReq/usedRange", sh, timeout=120).json()
+        used = session.request("GET", f"{workbook_url}/worksheets/DataReq/usedRange", timeout=120).json()
         address = used.get("address", "")
         match = re.search(r'!([A-Za-z]+)\d+:([A-Za-z]+)(\d+)', address)
         end_row = int(match.group(3)) if match else 1000
@@ -216,10 +307,10 @@ def process_and_upload(report_path: Path):
         if end_row >= 2:
             print(f"Limpiando datos existentes B2:R{end_row} y Z2:Z{end_row}...")
             # Microsoft Graph clear endpoint
-            graph_request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:R{end_row}')/clear", 
-                          sh, json={"applyTo": "Contents"}, timeout=120)
-            graph_request("POST", f"{workbook_url}/worksheets/DataReq/range(address='Z2:Z{end_row}')/clear", 
-                          sh, json={"applyTo": "Contents"}, timeout=120)
+            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:R{end_row}')/clear",
+                            json={"applyTo": "Contents"}, timeout=120)
+            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='Z2:Z{end_row}')/clear",
+                            json={"applyTo": "Contents"}, timeout=120)
         
         if len(new_data) > 0:
             z_data = []
@@ -228,31 +319,43 @@ def process_and_upload(report_path: Path):
                 z_data.append([row[13]])
                 row[13] = ""
             
-            CHUNK_SIZE = 200
             import time
-            for i in range(0, len(new_data), CHUNK_SIZE):
-                chunk = new_data[i : i + CHUNK_SIZE]
-                chunk_z = z_data[i : i + CHUNK_SIZE]
+            for i in range(0, len(new_data), DATA_REQ_CHUNK_SIZE):
+                chunk = new_data[i : i + DATA_REQ_CHUNK_SIZE]
+                chunk_z = z_data[i : i + DATA_REQ_CHUNK_SIZE]
                 chunk_start = 2 + i
                 chunk_end = chunk_start + len(chunk) - 1
                 
                 chunk_addr = f"B{chunk_start}:R{chunk_end}"
                 print(f"Pegando chunk {chunk_addr}...")
-                graph_request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr}')", 
-                              sh, json={"values": chunk}, timeout=120)
+                session.request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr}')",
+                                json={"values": chunk}, timeout=120)
                               
                 chunk_addr_z = f"Z{chunk_start}:Z{chunk_end}"
                 print(f"Pegando chunk {chunk_addr_z}...")
-                graph_request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr_z}')", 
-                              sh, json={"values": chunk_z}, timeout=120)
+                session.request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr_z}')",
+                                json={"values": chunk_z}, timeout=120)
                 time.sleep(1)
-                              
+
+            last_row = len(new_data) + 1
+            last_main = session.request(
+                "GET",
+                f"{workbook_url}/worksheets/DataReq/range(address='B{last_row}:R{last_row}')",
+                timeout=120,
+            ).json().get("values", [[]])[0]
+            last_z = session.request(
+                "GET",
+                f"{workbook_url}/worksheets/DataReq/range(address='Z{last_row}:Z{last_row}')",
+                timeout=120,
+            ).json().get("values", [[]])[0]
+            if not excel_rows_equal(new_data[-1], last_main):
+                raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:R.")
+            if not excel_rows_equal(z_data[-1], last_z):
+                raise RuntimeError("La verificacion final de DataReq fallo en la columna Z.")
+
             print("Datos copiados exitosamente a DataReq.")
     finally:
-        try:
-            graph_request("POST", f"{workbook_url}/closeSession", sh, timeout=30)
-        except:
-            pass
+        session.close()
 
 def run() -> None:
     user = required_secret("POSCO_USER")
