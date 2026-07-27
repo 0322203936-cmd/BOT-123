@@ -37,6 +37,22 @@ class DataReqSessionTests(unittest.TestCase):
         self.assertTrue(excel_rows_equal(["VERONICA", None], ["VERONICA", ""]))
         self.assertFalse(excel_rows_equal(["VERONICA", 8], ["VERONICA", 10]))
 
+    def test_excel_verification_accepts_excel_date_serials(self):
+        self.assertTrue(
+            excel_rows_equal(
+                ["2026-09-11T00:00:00", 8],
+                [46276, 8.0],
+            )
+        )
+
+    def test_excel_verification_rejects_a_different_date(self):
+        self.assertFalse(
+            excel_rows_equal(
+                ["2026-09-11T00:00:00"],
+                [46275],
+            )
+        )
+
     def test_renews_invalid_session_and_retries_pending_request(self):
         opened = 0
         patch_sessions = []
