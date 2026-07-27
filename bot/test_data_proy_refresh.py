@@ -8,7 +8,11 @@ requests_stub.Response = object
 requests_stub.request = lambda *args, **kwargs: None
 sys.modules.setdefault("requests", requests_stub)
 
-from data_proy_refresh import combine_like_power_query, refresh_weeks_pivot
+from data_proy_refresh import (
+    combine_like_power_query,
+    excel_rows_equal,
+    refresh_weeks_pivot,
+)
 from data_proy import clear_and_write
 
 
@@ -57,6 +61,22 @@ class DataProyRefreshTests(unittest.TestCase):
                 [["FLOR"], ["ROSA"]],
                 ["FLOR", "FLOR"],
             )
+
+    def test_excel_verification_treats_none_and_blank_as_equal(self) -> None:
+        self.assertTrue(
+            excel_rows_equal(
+                ["VERONICA", 31, None],
+                ["VERONICA", 31, ""],
+            )
+        )
+
+    def test_excel_verification_still_detects_real_differences(self) -> None:
+        self.assertFalse(
+            excel_rows_equal(
+                ["VERONICA", 31, None],
+                ["VERONICA", 32, ""],
+            )
+        )
 
     def test_refreshes_only_expected_pivot(self) -> None:
         calls = []

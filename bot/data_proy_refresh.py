@@ -11,6 +11,20 @@ CHUNK_SIZE = 200
 GraphRequest = Callable[..., Any]
 
 
+def excel_rows_equal(expected: list[Any], actual: list[Any]) -> bool:
+    """Compare Excel rows treating Graph's null and blank as the same cell."""
+    if len(expected) != len(actual):
+        return False
+
+    def normalized(value: Any) -> Any:
+        return "" if value is None else value
+
+    return all(
+        normalized(expected_value) == normalized(actual_value)
+        for expected_value, actual_value in zip(expected, actual)
+    )
+
+
 def _normalized_rows(payload: dict[str, Any], table_name: str) -> list[list[Any]]:
     values = payload.get("values", [])
     if not values or not isinstance(values[0], list):
@@ -202,7 +216,7 @@ def rebuild_append1(
             "Append1 no quedo con la cantidad esperada de filas "
             f"({len(verification) - 1} != {desired_data_rows})."
         )
-    if combined and verification[-1] != combined[-1]:
+    if combined and not excel_rows_equal(combined[-1], verification[-1]):
         raise RuntimeError("La ultima fila de Append1 no coincide con el resultado esperado.")
 
     print(
