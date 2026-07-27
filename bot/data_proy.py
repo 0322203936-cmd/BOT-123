@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 from sharepoint_sync import (
@@ -10,7 +11,7 @@ from sharepoint_sync import (
     resolve_sharepoint_item_by_url,
 )
 from excel_range_sync import graph_request
-from data_proy_refresh import refresh_data_proy_outputs
+from data_proy_refresh import rebuild_append1_output, refresh_weeks_pivot
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BB6111299-1373-4717-A2B7-3D507AD77A8A%7D&file=Requerimiento%20vs%20proyeccion.xlsm&action=default&mobileredirect=true"
 PLAN_COSECHA_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/DocCampos/_layouts/15/Doc.aspx?sourcedoc=%7BB574F211-4861-4031-8C8E-03448B593DA2%7D&file=Plan%20de%20cosecha%202025.xlsx&action=default&mobileredirect=true"
@@ -294,23 +295,59 @@ def main():
                 patch(workbook_url, sh, f"U{sr}:U{er}", [[""] for _ in range(cnt)])
 
         print("Escritura finalizada con exito.")
-        print("Actualizando Append1 y Weeks x FechaProduccion...")
-        refreshed_rows = refresh_data_proy_outputs(
+        print("Actualizando Append1...")
+        refreshed_rows = rebuild_append1_output(
             graph_request,
             workbook_url,
             sh,
         )
+        print(
+            "Append1 actualizada con exito: "
+            f"{refreshed_rows} filas."
+        )
+    finally:
+        print("Guardando Append1 y cerrando la primera sesion de Excel Online...")
+        try:
+            graph_request("POST", f"{workbook_url}/closeSession", sh, timeout=30)
+        except Exception as exc:
+            print(f"Aviso al cerrar sesion: {exc}")
+
+    print("Abriendo una sesion nueva para actualizar Weeks x FechaProduccion...")
+    pivot_sess = graph_request(
+        "POST",
+        f"{workbook_url}/createSession",
+        headers,
+        json={"persistChanges": True},
+        timeout=60,
+    ).json()
+    pivot_headers = {
+        **headers,
+        "workbook-session-id": pivot_sess["id"],
+    }
+    try:
+        refresh_weeks_pivot(
+            graph_request,
+            workbook_url,
+            pivot_headers,
+        )
+        print("Esperando que Excel Online guarde la tabla dinamica...")
+        time.sleep(5)
         print(
             "Salidas de Data Proy actualizadas con exito: "
             f"Append1={refreshed_rows} filas; "
             "Weeks x FechaProduccion=actualizada."
         )
     finally:
-        print("Cerrando sesion de Excel Online...")
+        print("Cerrando sesion de la tabla dinamica...")
         try:
-            graph_request("POST", f"{workbook_url}/closeSession", sh, timeout=30)
+            graph_request(
+                "POST",
+                f"{workbook_url}/closeSession",
+                pivot_headers,
+                timeout=30,
+            )
         except Exception as exc:
-            print(f"Aviso al cerrar sesion: {exc}")
+            print(f"Aviso al cerrar sesion de tabla dinamica: {exc}")
 
 
 if __name__ == "__main__":

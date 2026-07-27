@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from playwright.sync_api import sync_playwright
 
 from sharepoint_sync import graph_token, GRAPH_URL, resolve_sharepoint_item_by_url, graph_headers
 from excel_range_sync import graph_request
+from data_proy_refresh import rebuild_append1_output, refresh_weeks_pivot
 
 POSCO_URL = "http://3.132.9.174/Posco/"
 CAPTURES_DIR = Path("artifacts/capturas")
@@ -150,6 +152,57 @@ class ResilientWorkbookSession:
                 self.session_headers,
                 **kwargs,
             )
+
+
+def session_graph_request(session):
+    def request(method, url, _headers, **kwargs):
+        return session.request(method, url, **kwargs)
+
+    return request
+
+
+def refresh_data_req_outputs(
+    workbook_url,
+    headers,
+    session_factory=None,
+    sleep_func=time.sleep,
+):
+    factory = session_factory or ResilientWorkbookSession
+
+    print("Abriendo una sesion nueva para actualizar Append1...")
+    append_session = factory(workbook_url, headers)
+    append_session.open()
+    try:
+        append_rows = rebuild_append1_output(
+            session_graph_request(append_session),
+            workbook_url,
+            append_session.session_headers,
+        )
+        print(f"Append1 actualizada con exito: {append_rows} filas.")
+    finally:
+        append_session.close()
+
+    print("Abriendo una sesion nueva para actualizar Weeks x FechaProduccion...")
+    pivot_session = factory(workbook_url, headers)
+    pivot_session.open()
+    try:
+        refresh_weeks_pivot(
+            session_graph_request(pivot_session),
+            workbook_url,
+            pivot_session.session_headers,
+        )
+        print("Esperando que Excel Online guarde la tabla dinamica...")
+        sleep_func(5)
+        print(
+            "Salidas de Data Req actualizadas con exito: "
+            f"Append1={append_rows} filas; "
+            "Weeks x FechaProduccion=actualizada."
+        )
+    finally:
+        pivot_session.close()
+
+    return append_rows
+
 
 def env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -358,7 +411,6 @@ def process_and_upload(report_path: Path):
                 z_data.append([row[13]])
                 row[13] = ""
             
-            import time
             for i in range(0, len(new_data), DATA_REQ_CHUNK_SIZE):
                 chunk = new_data[i : i + DATA_REQ_CHUNK_SIZE]
                 chunk_z = z_data[i : i + DATA_REQ_CHUNK_SIZE]
@@ -395,6 +447,8 @@ def process_and_upload(report_path: Path):
             print("Datos copiados exitosamente a DataReq.")
     finally:
         session.close()
+
+    refresh_data_req_outputs(workbook_url, headers)
 
 def run() -> None:
     user = required_secret("POSCO_USER")
