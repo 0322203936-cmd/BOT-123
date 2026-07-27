@@ -18,18 +18,57 @@ REPORTS_DIR = Path("artifacts/reportes")
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BB6111299-1373-4717-A2B7-3D507AD77A8A%7D&file=Requerimiento%20vs%20proyeccion.xlsm&action=default&mobileredirect=true"
 DATA_REQ_CHUNK_SIZE = 100
+EXCEL_DATE_EPOCH = datetime(1899, 12, 30)
+
+
+def parse_excel_datetime(value):
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:[T ][0-9:.+-]+)?", candidate):
+            return None
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            return parsed.replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def excel_values_equal(expected, actual) -> bool:
+    expected_blank = expected is None or expected == ""
+    actual_blank = actual is None or actual == ""
+    if expected_blank or actual_blank:
+        return expected_blank and actual_blank
+
+    expected_date = parse_excel_datetime(expected)
+    if expected_date is not None:
+        actual_date = parse_excel_datetime(actual)
+        if actual_date is None and isinstance(actual, (int, float)):
+            actual_date = EXCEL_DATE_EPOCH + timedelta(days=float(actual))
+        if actual_date is not None:
+            return expected_date == actual_date
+
+    if (
+        isinstance(expected, (int, float))
+        and not isinstance(expected, bool)
+        and isinstance(actual, (int, float))
+        and not isinstance(actual, bool)
+    ):
+        return math.isclose(float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-9)
+
+    return expected == actual
 
 
 def excel_rows_equal(expected, actual) -> bool:
     width = max(len(expected), len(actual))
     expected_values = list(expected) + [""] * (width - len(expected))
     actual_values = list(actual) + [""] * (width - len(actual))
-
-    def normalized(value):
-        return "" if value is None else value
-
     return all(
-        normalized(expected_value) == normalized(actual_value)
+        excel_values_equal(expected_value, actual_value)
         for expected_value, actual_value in zip(expected_values, actual_values)
     )
 
