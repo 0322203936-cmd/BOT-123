@@ -10,6 +10,7 @@ from sharepoint_sync import (
     resolve_sharepoint_item_by_url,
 )
 from excel_range_sync import graph_request
+from data_proy_refresh import refresh_data_proy_outputs
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B277A76AA-508A-47F8-8A4A-F19D46660D65%7D&file=Requerimiento%20vs%20proyeccion%20Test.xlsm&action=default&mobileredirect=true"
 PLAN_COSECHA_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/DocCampos/_layouts/15/Doc.aspx?sourcedoc=%7BB574F211-4861-4031-8C8E-03448B593DA2%7D&file=Plan%20de%20cosecha%202025.xlsx&action=default&mobileredirect=true"
@@ -282,6 +283,17 @@ def main():
                 patch(workbook_url, sh, f"S{sr}:S{er}", [[None] for _ in range(cnt)])
 
         print("Escritura finalizada con exito.")
+        print("Actualizando Append1 y Weeks x FechaProduccion...")
+        refreshed_rows = refresh_data_proy_outputs(
+            graph_request,
+            workbook_url,
+            sh,
+        )
+        print(
+            "Salidas de Data Proy actualizadas con exito: "
+            f"Append1={refreshed_rows} filas; "
+            "Weeks x FechaProduccion=actualizada."
+        )
     finally:
         print("Cerrando sesion de Excel Online...")
         try:
