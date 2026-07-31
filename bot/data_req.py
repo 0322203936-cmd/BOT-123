@@ -273,7 +273,7 @@ def calculate_date_range(today: date | None = None) -> tuple[date, date]:
     if days_since_friday == 0:
         days_since_friday = 7
     previous_friday = current_date - timedelta(days=days_since_friday)
-    return previous_friday, previous_friday + timedelta(weeks=7)
+    return previous_friday, previous_friday + timedelta(weeks=8)
 
 def find_date_input(page, label: str, fallback_index: int):
     group_input = page.locator(f'.input-group:has-text("{label}") input')
@@ -486,7 +486,7 @@ def run() -> None:
             except PlaywrightTimeoutError:
                 pass
             page.wait_for_timeout(3_000)
-            print("Configurando Load Date Menor y Load Date Mayor (7 semanas)...")
+            print("Configurando Load Date Menor y Load Date Mayor (8 semanas)...")
             set_load_date_range(page)
             page.wait_for_timeout(1_000)
             click_search(page)
