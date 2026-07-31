@@ -20,7 +20,7 @@ const workflows = {
     file: 'bot.yml',
     name: 'Reporte Galleria',
     description: 'Descarga el reporte de Galleria Farms y lo carga automáticamente en Posco.',
-    schedule: 'Diario · 7:00 AM, 12:00 PM y 4:00 PM',
+    schedule: 'Diario · 4:00 AM',
   },
   cancelaciones: {
     owner,
