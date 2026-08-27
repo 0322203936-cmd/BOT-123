@@ -54,13 +54,13 @@ def excel_values_equal(expected, actual) -> bool:
         if actual_date is not None:
             return expected_date == actual_date
 
-    if (
-        isinstance(expected, (int, float))
-        and not isinstance(expected, bool)
-        and isinstance(actual, (int, float))
-        and not isinstance(actual, bool)
-    ):
-        return math.isclose(float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-9)
+    if not isinstance(expected, bool) and not isinstance(actual, bool):
+        try:
+            exp_num = float(expected)
+            act_num = float(actual)
+            return math.isclose(exp_num, act_num, rel_tol=1e-9, abs_tol=1e-9)
+        except (ValueError, TypeError):
+            pass
 
     return expected == actual
 
