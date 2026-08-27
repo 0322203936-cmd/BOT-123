@@ -19,7 +19,7 @@ CAPTURES_DIR = Path("artifacts/capturas")
 REPORTS_DIR = Path("artifacts/reportes")
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BB6111299-1373-4717-A2B7-3D507AD77A8A%7D&file=Requerimiento%20vs%20proyeccion.xlsm&action=default&mobileredirect=true"
-DATA_REQ_CHUNK_SIZE = 100
+DATA_REQ_CHUNK_SIZE = 1000
 EXCEL_DATE_EPOCH = datetime(1899, 12, 30)
 
 
