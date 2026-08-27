@@ -115,7 +115,7 @@ def main():
         print("Obteniendo datos en vivo...")
         range_data  = graph_request(
             "GET",
-            f"{plan_workbook_url}/worksheets('{quoted_sheet}')/range(address='A1:AB1000')",
+            f"{plan_workbook_url}/worksheets('{quoted_sheet}')/range(address='A1:X1000')",
             psh
         ).json()
         plan_values = range_data.get("values", [])
@@ -132,8 +132,7 @@ def main():
             return int(nums[0]) if nums else str(val).strip()
 
         weeks = [get_week(6),  get_week(18), get_week(19), get_week(20),
-                 get_week(21), get_week(22), get_week(23), get_week(24),
-                 get_week(25), get_week(26), get_week(27), get_week(28)]
+                 get_week(21), get_week(22), get_week(23), get_week(24)]
         weeks = [w for w in weeks if w != ""]   # drop empty slots
         print(f"Semanas a procesar: {weeks}")
 
@@ -163,10 +162,6 @@ def main():
                     row_data[21] if len(row_data) > 21 and row_data[21] is not None else 0,
                     row_data[22] if len(row_data) > 22 and row_data[22] is not None else 0,
                     row_data[23] if len(row_data) > 23 and row_data[23] is not None else 0,
-                    row_data[24] if len(row_data) > 24 and row_data[24] is not None else 0,
-                    row_data[25] if len(row_data) > 25 and row_data[25] is not None else 0,
-                    row_data[26] if len(row_data) > 26 and row_data[26] is not None else 0,
-                    row_data[27] if len(row_data) > 27 and row_data[27] is not None else 0,
                 ],
             })
 
