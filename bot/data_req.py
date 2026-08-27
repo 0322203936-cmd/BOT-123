@@ -428,6 +428,7 @@ def process_and_upload(report_path: Path):
                                 json={"values": chunk_z}, timeout=120)
                 time.sleep(1)
 
+            time.sleep(3)
             last_row = len(new_data) + 1
             last_main = session.request(
                 "GET",
@@ -440,8 +441,10 @@ def process_and_upload(report_path: Path):
                 timeout=120,
             ).json().get("values", [[]])[0]
             if not excel_rows_equal(new_data[-1], last_main):
+                print(f"ERROR DE VERIFICACION B:R.\nEsperado (Posco): {new_data[-1]}\nObtenido (SharePoint): {last_main}", flush=True)
                 raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:R.")
             if not excel_rows_equal(z_data[-1], last_z):
+                print(f"ERROR DE VERIFICACION Z.\nEsperado (Posco): {z_data[-1]}\nObtenido (SharePoint): {last_z}", flush=True)
                 raise RuntimeError("La verificacion final de DataReq fallo en la columna Z.")
 
             print("Datos copiados exitosamente a DataReq.")
