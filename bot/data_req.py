@@ -267,13 +267,13 @@ def select_active_status(page) -> None:
     raise RuntimeError("No se encontró el filtro de estatus con la opción ACTIVO.")
 
 def calculate_date_range(today: date | None = None) -> tuple[date, date]:
-    """Devuelve el viernes anterior y el viernes 7 semanas después para DataReq."""
+    """Devuelve el viernes anterior y el viernes 12 semanas después para DataReq."""
     current_date = today or datetime.now(ZoneInfo("America/Tijuana")).date()
     days_since_friday = (current_date.weekday() - 4) % 7
     if days_since_friday == 0:
         days_since_friday = 7
     previous_friday = current_date - timedelta(days=days_since_friday)
-    return previous_friday, previous_friday + timedelta(weeks=8)
+    return previous_friday, previous_friday + timedelta(weeks=13)
 
 def find_date_input(page, label: str, fallback_index: int):
     group_input = page.locator(f'.input-group:has-text("{label}") input')
@@ -486,7 +486,7 @@ def run() -> None:
             except PlaywrightTimeoutError:
                 pass
             page.wait_for_timeout(3_000)
-            print("Configurando Load Date Menor y Load Date Mayor (8 semanas)...")
+            print("Configurando Load Date Menor y Load Date Mayor (13 semanas)...")
             set_load_date_range(page)
             page.wait_for_timeout(1_000)
             click_search(page)
