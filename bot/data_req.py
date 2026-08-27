@@ -365,8 +365,8 @@ def process_and_upload(report_path: Path):
     # So we read normally (header=0) which uses row 0 as column names.
     df = pd.read_excel(report_path)
     
-    # We need to take columns A to W (indices 0 to 22), but SKIP N (index 13).
-    selected_cols = [i for i in range(23) if i != 13]
+    # We need to take columns A to R (indices 0 to 17), but SKIP N (index 13).
+    selected_cols = [i for i in range(18) if i != 13]
     
     # Extraer data (lista de listas), descartando los títulos del DataFrame
     data_subset = df.iloc[:, selected_cols]
@@ -397,9 +397,9 @@ def process_and_upload(report_path: Path):
         end_row = int(match.group(3)) if match else 1000
         
         if end_row >= 2:
-            print(f"Limpiando datos existentes B2:W{end_row} y Z2:Z{end_row}...")
+            print(f"Limpiando datos existentes B2:R{end_row} y Z2:Z{end_row}...")
             # Microsoft Graph clear endpoint
-            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:W{end_row}')/clear",
+            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:R{end_row}')/clear",
                             json={"applyTo": "Contents"}, timeout=120)
             session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='Z2:Z{end_row}')/clear",
                             json={"applyTo": "Contents"}, timeout=120)
@@ -417,7 +417,7 @@ def process_and_upload(report_path: Path):
                 chunk_start = 2 + i
                 chunk_end = chunk_start + len(chunk) - 1
                 
-                chunk_addr = f"B{chunk_start}:W{chunk_end}"
+                chunk_addr = f"B{chunk_start}:R{chunk_end}"
                 print(f"Pegando chunk {chunk_addr}...")
                 session.request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr}')",
                                 json={"values": chunk}, timeout=120)
@@ -431,7 +431,7 @@ def process_and_upload(report_path: Path):
             last_row = len(new_data) + 1
             last_main = session.request(
                 "GET",
-                f"{workbook_url}/worksheets/DataReq/range(address='B{last_row}:W{last_row}')",
+                f"{workbook_url}/worksheets/DataReq/range(address='B{last_row}:R{last_row}')",
                 timeout=120,
             ).json().get("values", [[]])[0]
             last_z = session.request(
@@ -440,7 +440,7 @@ def process_and_upload(report_path: Path):
                 timeout=120,
             ).json().get("values", [[]])[0]
             if not excel_rows_equal(new_data[-1], last_main):
-                raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:W.")
+                raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:R.")
             if not excel_rows_equal(z_data[-1], last_z):
                 raise RuntimeError("La verificacion final de DataReq fallo en la columna Z.")
 
@@ -490,8 +490,8 @@ def run() -> None:
             set_load_date_range(page)
             page.wait_for_timeout(1_000)
             click_search(page)
-            print("Esperando 2 minutos para que cargue el rango de fechas...")
-            page.wait_for_timeout(120_000)
+            print("Esperando 4 minutos para que cargue el rango de fechas...")
+            page.wait_for_timeout(240_000)
             capture(page, "04_rango_fechas.png")
 
             print("Cambiando el filtro de estatus a ACTIVO...")
