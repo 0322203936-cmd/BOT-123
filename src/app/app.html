@@ -76,21 +76,36 @@
             }
           </div>
 
-          <button
-            class="run-button"
-            type="button"
-            [disabled]="running() !== null || isActive(workflow.run) || !configured()"
-            (click)="execute(workflow)"
-          >
-            @if (running() === workflow.key) {
-              <span class="button-loader"></span> Enviando…
-            } @else if (isActive(workflow.run)) {
-              <span class="button-loader"></span> En ejecución · {{ elapsedLabel(workflow.run) }}
-            } @else {
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z" /></svg>
-              Ejecutar
-            }
-          </button>
+          <div class="card-buttons">
+            <button
+              class="run-button"
+              type="button"
+              [disabled]="running() !== null || isActive(workflow.run) || !configured()"
+              (click)="execute(workflow)"
+            >
+              @if (running() === workflow.key) {
+                <span class="button-loader"></span> Enviando…
+              } @else if (isActive(workflow.run)) {
+                <span class="button-loader"></span> En ejecución · {{ elapsedLabel(workflow.run) }}
+              } @else {
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z" /></svg>
+                Ejecutar
+              }
+            </button>
+            <button
+              class="download-button"
+              type="button"
+              [disabled]="downloading() !== null || !workflow.run || isActive(workflow.run)"
+              (click)="downloadReport(workflow)"
+            >
+              @if (downloading() === workflow.key) {
+                <span class="button-loader dark"></span> Descargando…
+              } @else {
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14" /></svg>
+                Descargar reporte
+              }
+            </button>
+          </div>
         </article>
       }
     </section>

@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const express = require('express');
 const helmet = require('helmet');
 
@@ -89,6 +90,41 @@ const workflows = {
 
 const lastDispatch = new Map();
 
+const reportMatchers = {
+  galleria: [
+    (name) => /(^|\/)reporte_galleria_.*\.(?:xlsx?|xlsm)$/i.test(name),
+  ],
+  cancelaciones: [
+    (name) => /(^|\/)reporte_cancelaciones_pendientes\.csv$/i.test(name),
+  ],
+  pegarData: [
+    (name) => /^artifacts\/reportes\/.*\.(?:xlsx?|xlsm)$/i.test(name),
+    (name) => /_actualizado\.xlsm$/i.test(name),
+  ],
+  inventario: [
+    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+  ],
+  dataProy: [
+    (name) => /^artifacts\/sharepoint\/.*\.(?:xlsx?|xlsm|csv)$/i.test(name),
+  ],
+  ainventario: [
+    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+  ],
+  dataReq: [
+    (name) => /^artifacts\/reportes\/.*\.xlsx$/i.test(name),
+  ],
+};
+
+const artifactNameMatchers = {
+  galleria: (name) => name.startsWith('reporte-galleria-'),
+  cancelaciones: (name) => name.startsWith('reporte-cancelaciones-'),
+  pegarData: (name) => name.startsWith('capturas-pegar-data-'),
+  inventario: (name) => name.startsWith('capturas-inventario-'),
+  dataProy: (name) => name.startsWith('logs-data-proy-'),
+  ainventario: (name) => name === 'evidencias-posco',
+  dataReq: (name) => name === 'evidencias-posco-datareq',
+};
+
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '10kb' }));
@@ -138,6 +174,151 @@ async function githubRequest(endpoint, options = {}) {
 
   if (response.status === 204) return null;
   return response.json();
+}
+
+async function githubBinary(endpoint) {
+  if (!githubToken) {
+    const error = new Error('Falta configurar GITHUB_TOKEN en Render.');
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(`https://api.github.com${endpoint}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${githubToken}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'Atajos-Globales',
+    },
+  });
+
+  if (!response.ok) {
+    const error = new Error(`GitHub rechazó la descarga (${response.status}).`);
+    error.status = response.status === 401 || response.status === 403 ? 502 : response.status;
+    throw error;
+  }
+
+  return Buffer.from(await response.arrayBuffer());
+}
+
+function unzipEntries(archive) {
+  const endOfCentralDirectory = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+  const minimumOffset = Math.max(0, archive.length - 65_557);
+  let endOffset = -1;
+  for (let offset = archive.length - 22; offset >= minimumOffset; offset -= 1) {
+    if (archive.subarray(offset, offset + 4).equals(endOfCentralDirectory)) {
+      endOffset = offset;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error('El artifact descargado no es un ZIP válido.');
+
+  const entryCount = archive.readUInt16LE(endOffset + 10);
+  const centralDirectoryOffset = archive.readUInt32LE(endOffset + 16);
+  const entries = [];
+  let offset = centralDirectoryOffset;
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (archive.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error('El índice del artifact ZIP está dañado.');
+    }
+    const compression = archive.readUInt16LE(offset + 10);
+    const compressedSize = archive.readUInt32LE(offset + 20);
+    const uncompressedSize = archive.readUInt32LE(offset + 24);
+    const nameLength = archive.readUInt16LE(offset + 28);
+    const extraLength = archive.readUInt16LE(offset + 30);
+    const commentLength = archive.readUInt16LE(offset + 32);
+    const localHeaderOffset = archive.readUInt32LE(offset + 42);
+    const name = archive.toString('utf8', offset + 46, offset + 46 + nameLength);
+    entries.push({
+      name,
+      compression,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset,
+      directory: name.endsWith('/'),
+    });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+
+  return entries.map((entry) => {
+    if (entry.directory) return { ...entry, data: null };
+    const localOffset = entry.localHeaderOffset;
+    if (archive.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error('La entrada del artifact ZIP está dañada.');
+    }
+    const nameLength = archive.readUInt16LE(localOffset + 26);
+    const extraLength = archive.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + nameLength + extraLength;
+    const compressed = archive.subarray(dataStart, dataStart + entry.compressedSize);
+    let data;
+    if (entry.compression === 0) data = compressed;
+    else if (entry.compression === 8) data = zlib.inflateRawSync(compressed);
+    else throw new Error(`Compresión ZIP no soportada para ${entry.name}.`);
+    if (data.length !== entry.uncompressedSize) {
+      throw new Error(`El archivo ${entry.name} quedó incompleto al extraerlo.`);
+    }
+    return { ...entry, data };
+  });
+}
+
+function reportContentType(filename) {
+  const extension = path.extname(filename).toLowerCase();
+  return {
+    '.csv': 'text/csv; charset=utf-8',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  }[extension] || 'application/octet-stream';
+}
+
+async function latestReportFile(key, workflow) {
+  const matchers = reportMatchers[key] || [];
+  const artifactMatcher = artifactNameMatchers[key];
+  if (!matchers.length || !artifactMatcher) {
+    const error = new Error('Este bot todavía no genera un archivo descargable.');
+    error.status = 404;
+    throw error;
+  }
+
+  const runsData = await githubRequest(
+    `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/workflows/${encodeURIComponent(workflow.file)}/runs?per_page=10`,
+  );
+  const runs = runsData.workflow_runs || [];
+  const latest = runs[0];
+  if (latest && (latest.status === 'queued' || latest.status === 'in_progress')) {
+    const error = new Error('El bot todavía está ejecutándose; el reporte estará disponible al terminar.');
+    error.status = 409;
+    throw error;
+  }
+
+  for (const run of runs.filter((item) => item.status === 'completed')) {
+    const artifactsData = await githubRequest(
+      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/runs/${run.id}/artifacts?per_page=100`,
+    );
+    const artifact = (artifactsData.artifacts || []).find(
+      (item) => !item.expired && artifactMatcher(item.name),
+    );
+    if (!artifact) continue;
+
+    const archive = await githubBinary(
+      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/artifacts/${artifact.id}/zip`,
+    );
+    const file = unzipEntries(archive).find(
+      (entry) => !entry.directory && entry.data && matchers.some((matcher) => matcher(entry.name)),
+    );
+    if (file) {
+      return {
+        data: file.data,
+        filename: path.basename(file.name),
+        run,
+      };
+    }
+  }
+
+  const error = new Error('No se encontró un reporte en las últimas ejecuciones de este bot.');
+  error.status = 404;
+  throw error;
 }
 
 function serializeRun(run) {
@@ -240,6 +421,25 @@ app.post('/api/workflows/:key/dispatch', authenticate, async (req, res, next) =>
     });
   } catch (error) {
     next(error);
+  }
+});
+
+app.get('/api/workflows/:key/report', authenticate, async (req, res, next) => {
+  try {
+    const workflow = workflows[req.params.key];
+    if (!workflow) return res.status(404).json({ message: 'Automatización no encontrada.' });
+
+    const report = await latestReportFile(req.params.key, workflow);
+    const safeFilename = report.filename.replace(/[\r\n"\\]/g, '_');
+    res.setHeader('Content-Type', reportContentType(safeFilename));
+    res.setHeader('Content-Length', report.data.length);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
+    );
+    return res.send(report.data);
+  } catch (error) {
+    return next(error);
   }
 });
 
