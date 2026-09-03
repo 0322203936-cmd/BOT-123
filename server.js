@@ -98,31 +98,45 @@ const reportMatchers = {
     (name) => /(^|\/)reporte_cancelaciones_pendientes\.csv$/i.test(name),
   ],
   pegarData: [
-    (name) => /^artifacts\/reportes\/.*\.(?:xlsx?|xlsm)$/i.test(name),
+    (name) => /(^|\/)[^/]*_formateado\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xls$/i.test(name),
     (name) => /_actualizado\.xlsm$/i.test(name),
   ],
   inventario: [
-    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
   dataProy: [
-    (name) => /^artifacts\/sharepoint\/.*\.(?:xlsx?|xlsm|csv)$/i.test(name),
+    (name) => /(^|\/)[^/]*\.(?:xlsx?|xlsm|csv)$/i.test(name),
   ],
   ainventario: [
-    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
   dataReq: [
-    (name) => /^artifacts\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
 };
 
 const artifactNameMatchers = {
-  galleria: (name) => name.startsWith('reporte-galleria-'),
-  cancelaciones: (name) => name.startsWith('reporte-cancelaciones-'),
-  pegarData: (name) => name.startsWith('capturas-pegar-data-'),
-  inventario: (name) => name.startsWith('capturas-inventario-'),
-  dataProy: (name) => name.startsWith('logs-data-proy-'),
-  ainventario: (name) => name === 'evidencias-posco',
-  dataReq: (name) => name === 'evidencias-posco-datareq',
+  galleria: [(name) => name.startsWith('reporte-galleria-')],
+  cancelaciones: [(name) => name.startsWith('reporte-cancelaciones-')],
+  pegarData: [
+    (name) => name.startsWith('reportes-pegar-data-'),
+    (name) => name.startsWith('capturas-pegar-data-'),
+  ],
+  inventario: [
+    (name) => name.startsWith('reportes-inventario-'),
+    (name) => name.startsWith('capturas-inventario-'),
+  ],
+  dataProy: [(name) => name.startsWith('logs-data-proy-')],
+  ainventario: [
+    (name) => name.startsWith('reportes-ainventario-'),
+    (name) => name === 'evidencias-posco',
+  ],
+  dataReq: [
+    (name) => name.startsWith('reportes-data-req-'),
+    (name) => name === 'evidencias-posco-datareq',
+  ],
 };
 
 app.disable('x-powered-by');
@@ -201,7 +215,7 @@ async function githubBinary(endpoint) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-function unzipEntries(archive) {
+function zipEntries(archive) {
   const endOfCentralDirectory = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
   const minimumOffset = Math.max(0, archive.length - 65_557);
   let endOffset = -1;
@@ -241,25 +255,35 @@ function unzipEntries(archive) {
     offset += 46 + nameLength + extraLength + commentLength;
   }
 
-  return entries.map((entry) => {
-    if (entry.directory) return { ...entry, data: null };
-    const localOffset = entry.localHeaderOffset;
-    if (archive.readUInt32LE(localOffset) !== 0x04034b50) {
-      throw new Error('La entrada del artifact ZIP está dañada.');
-    }
-    const nameLength = archive.readUInt16LE(localOffset + 26);
-    const extraLength = archive.readUInt16LE(localOffset + 28);
-    const dataStart = localOffset + 30 + nameLength + extraLength;
-    const compressed = archive.subarray(dataStart, dataStart + entry.compressedSize);
-    let data;
-    if (entry.compression === 0) data = compressed;
-    else if (entry.compression === 8) data = zlib.inflateRawSync(compressed);
-    else throw new Error(`Compresión ZIP no soportada para ${entry.name}.`);
-    if (data.length !== entry.uncompressedSize) {
-      throw new Error(`El archivo ${entry.name} quedó incompleto al extraerlo.`);
-    }
-    return { ...entry, data };
-  });
+  return entries;
+}
+
+function extractZipEntry(archive, entry) {
+  if (entry.directory) return null;
+  const localOffset = entry.localHeaderOffset;
+  if (archive.readUInt32LE(localOffset) !== 0x04034b50) {
+    throw new Error('La entrada del artifact ZIP está dañada.');
+  }
+  const nameLength = archive.readUInt16LE(localOffset + 26);
+  const extraLength = archive.readUInt16LE(localOffset + 28);
+  const dataStart = localOffset + 30 + nameLength + extraLength;
+  const compressed = archive.subarray(dataStart, dataStart + entry.compressedSize);
+  let data;
+  if (entry.compression === 0) data = compressed;
+  else if (entry.compression === 8) data = zlib.inflateRawSync(compressed);
+  else throw new Error(`Compresión ZIP no soportada para ${entry.name}.`);
+  if (data.length !== entry.uncompressedSize) {
+    throw new Error(`El archivo ${entry.name} quedó incompleto al extraerlo.`);
+  }
+  return data;
+}
+
+function findReportEntry(entries, matchers) {
+  for (const matcher of matchers) {
+    const file = entries.find((entry) => !entry.directory && matcher(entry.name));
+    if (file) return file;
+  }
+  return null;
 }
 
 function reportContentType(filename) {
@@ -274,8 +298,8 @@ function reportContentType(filename) {
 
 async function latestReportFile(key, workflow) {
   const matchers = reportMatchers[key] || [];
-  const artifactMatcher = artifactNameMatchers[key];
-  if (!matchers.length || !artifactMatcher) {
+  const artifactMatchers = artifactNameMatchers[key] || [];
+  if (!matchers.length || !artifactMatchers.length) {
     const error = new Error('Este bot todavía no genera un archivo descargable.');
     error.status = 404;
     throw error;
@@ -296,23 +320,23 @@ async function latestReportFile(key, workflow) {
     const artifactsData = await githubRequest(
       `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/runs/${run.id}/artifacts?per_page=100`,
     );
-    const artifact = (artifactsData.artifacts || []).find(
-      (item) => !item.expired && artifactMatcher(item.name),
-    );
-    if (!artifact) continue;
+    for (const artifactMatcher of artifactMatchers) {
+      const artifact = (artifactsData.artifacts || []).find(
+        (item) => !item.expired && artifactMatcher(item.name),
+      );
+      if (!artifact) continue;
 
-    const archive = await githubBinary(
-      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/artifacts/${artifact.id}/zip`,
-    );
-    const file = unzipEntries(archive).find(
-      (entry) => !entry.directory && entry.data && matchers.some((matcher) => matcher(entry.name)),
-    );
-    if (file) {
-      return {
-        data: file.data,
-        filename: path.basename(file.name),
-        run,
-      };
+      const archive = await githubBinary(
+        `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/artifacts/${artifact.id}/zip`,
+      );
+      const file = findReportEntry(zipEntries(archive), matchers);
+      if (file) {
+        return {
+          data: extractZipEntry(archive, file),
+          filename: path.basename(file.name),
+          run,
+        };
+      }
     }
   }
 

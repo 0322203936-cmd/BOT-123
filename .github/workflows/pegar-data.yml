@@ -53,14 +53,22 @@ jobs:
           SHAREPOINT_TEST_COPY: ${{ inputs.crear_copia_prueba }}
         run: python bot/pegar_data.py
 
-      - name: Guardar capturas y reporte
+      - name: Guardar capturas y libro actualizado
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: capturas-pegar-data-${{ github.run_number }}
           path: |
             artifacts/capturas/*.png
-            artifacts/reportes/*
             artifacts/sharepoint/*_actualizado.xlsm
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar reporte descargable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-pegar-data-${{ github.run_number }}
+          path: artifacts/reportes/*
           if-no-files-found: warn
           retention-days: 7

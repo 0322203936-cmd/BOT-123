@@ -44,7 +44,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: evidencias-posco
-          path: |
-            artifacts/inventario/capturas/*.png
-            artifacts/inventario/reportes/*.xlsx
+          path: artifacts/inventario/capturas/*.png
+          retention-days: 7
+
+      - name: Guardar reporte descargable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-ainventario-${{ github.run_number }}
+          path: artifacts/inventario/reportes/*.xlsx
+          if-no-files-found: warn
           retention-days: 7
