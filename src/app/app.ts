@@ -43,6 +43,7 @@ export class App implements OnInit, OnDestroy {
   );
   protected readonly loading = signal(true);
   protected readonly running = signal<WorkflowKey | null>(null);
+  protected readonly downloading = signal<WorkflowKey | null>(null);
   protected readonly message = signal('');
   protected readonly error = signal('');
   protected readonly authRequired = signal(false);
@@ -164,6 +165,50 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
+  protected async downloadReport(workflow: WorkflowStatus): Promise<void> {
+    if (this.downloading() || !workflow.run || this.isActive(workflow.run)) return;
+
+    this.downloading.set(workflow.key);
+    this.error.set('');
+    try {
+      const response = await firstValueFrom(
+        this.http.get(`/api/workflows/${workflow.key}/report`, {
+          headers: this.authHeaders(),
+          observe: 'response',
+          responseType: 'blob',
+        }),
+      );
+      const blob = response.body;
+      if (!blob) throw new Error('El servidor no devolvió ningún archivo.');
+
+      const filename = this.downloadFilename(response.headers.get('Content-Disposition'));
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename || `reporte-${workflow.key}`;
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+      this.message.set(`Reporte de ${workflow.name} descargado.`);
+    } catch (error) {
+      this.error.set(await this.getDownloadErrorMessage(error));
+    } finally {
+      this.downloading.set(null);
+    }
+  }
+
+  private downloadFilename(contentDisposition: string | null): string {
+    if (!contentDisposition) return '';
+    const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    if (encoded) {
+      try {
+        return decodeURIComponent(encoded);
+      } catch {
+        return encoded;
+      }
+    }
+    return contentDisposition.match(/filename="([^"]+)"/i)?.[1] || '';
+  }
+
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
     if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq'] as WorkflowKey[]).includes(workflow.key)) {
       return true;
@@ -232,5 +277,17 @@ export class App implements OnInit, OnDestroy {
       if (typeof error.error?.message === 'string') return error.error.message;
     }
     return 'Ocurrió un error inesperado. Intenta nuevamente.';
+  }
+
+  private async getDownloadErrorMessage(error: unknown): Promise<string> {
+    if (error instanceof HttpErrorResponse && error.error instanceof Blob) {
+      try {
+        const payload = JSON.parse(await error.error.text());
+        if (typeof payload.message === 'string') return payload.message;
+      } catch {
+        // Conserva el mensaje genérico si la respuesta no contiene JSON.
+      }
+    }
+    return this.getErrorMessage(error);
   }
 }

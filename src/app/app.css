@@ -139,6 +139,30 @@
   transition: background 160ms ease, transform 160ms ease;
 }
 
+.card-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.download-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 43px;
+  padding: 0 10px;
+  color: #176b4d;
+  background: #eef6f1;
+  border: 1px solid #cfe3d8;
+  border-radius: 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+}
+.download-button:hover:not(:disabled) { background: #dceee4; transform: translateY(-1px); }
+.download-button:disabled { cursor: not-allowed; opacity: .52; }
+.download-button svg { width: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.button-loader.dark { border-color: rgba(23, 107, 77, .25); border-top-color: #176b4d; }
+
 .secondary .run-button { background: linear-gradient(135deg, #334f60, #203643); }
 .tertiary .run-button { background: linear-gradient(135deg, #8a493b, #613027); }
 .quaternary .run-button { background: linear-gradient(135deg, #665a91, #443b6b); }
