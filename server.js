@@ -98,20 +98,22 @@ const reportMatchers = {
     (name) => /(^|\/)reporte_cancelaciones_pendientes\.csv$/i.test(name),
   ],
   pegarData: [
-    (name) => /^artifacts\/reportes\/.*\.(?:xlsx?|xlsm)$/i.test(name),
+    (name) => /(^|\/)[^/]*_formateado\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xls$/i.test(name),
     (name) => /_actualizado\.xlsm$/i.test(name),
   ],
   inventario: [
-    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
   dataProy: [
-    (name) => /^artifacts\/sharepoint\/.*\.(?:xlsx?|xlsm|csv)$/i.test(name),
+    (name) => /(^|\/)[^/]*\.(?:xlsx?|xlsm|csv)$/i.test(name),
   ],
   ainventario: [
-    (name) => /^artifacts\/inventario\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
   dataReq: [
-    (name) => /^artifacts\/reportes\/.*\.xlsx$/i.test(name),
+    (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
 };
 
@@ -276,6 +278,14 @@ function extractZipEntry(archive, entry) {
   return data;
 }
 
+function findReportEntry(entries, matchers) {
+  for (const matcher of matchers) {
+    const file = entries.find((entry) => !entry.directory && matcher(entry.name));
+    if (file) return file;
+  }
+  return null;
+}
+
 function reportContentType(filename) {
   const extension = path.extname(filename).toLowerCase();
   return {
@@ -319,9 +329,7 @@ async function latestReportFile(key, workflow) {
       const archive = await githubBinary(
         `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/artifacts/${artifact.id}/zip`,
       );
-      const file = zipEntries(archive).find(
-        (entry) => !entry.directory && matchers.some((matcher) => matcher(entry.name)),
-      );
+      const file = findReportEntry(zipEntries(archive), matchers);
       if (file) {
         return {
           data: extractZipEntry(archive, file),
