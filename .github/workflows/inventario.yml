@@ -46,11 +46,20 @@ jobs:
           INVENTARIO_UPLOAD: ${{ inputs.actualizar_sharepoint }}
         run: python -u bot/inventario.py
 
-      - name: Guardar capturas y reporte
+      - name: Guardar capturas
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: capturas-inventario-${{ github.run_number }}
-          path: artifacts/inventario/**/*
+          path: artifacts/inventario/capturas/**/*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar reporte descargable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-inventario-${{ github.run_number }}
+          path: artifacts/inventario/reportes/*.xlsx
           if-no-files-found: warn
           retention-days: 7
