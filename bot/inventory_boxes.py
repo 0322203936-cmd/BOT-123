@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from openpyxl import load_workbook
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -12,7 +13,9 @@ from sharepoint_sync import (
     download_sharepoint_file,
     graph_token,
     resolve_sharepoint_item_by_url,
+    upload_sharepoint_file,
 )
+from inventory_box_transform import transform_inventory_workbook
 
 
 KOMET_LOGIN_URL = "https://app.kometsales.com/sign-in/login.do#st"
@@ -351,16 +354,44 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
     print("XLS de cajas cargado correctamente en Kometsales.", flush=True)
 
 
-def download_and_normalize_source() -> Path:
+def current_local_date() -> date:
+    timezone_name = os.environ.get("BOT_TIMEZONE", "America/Tijuana").strip()
+    try:
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except ZoneInfoNotFoundError as exc:
+        raise RuntimeError(f"La zona horaria configurada no existe: {timezone_name}.") from exc
+
+
+def download_and_prepare_source() -> tuple[str, dict, Path]:
     token = graph_token()
     item = resolve_sharepoint_item_by_url(token, SHAREPOINT_BOXES_URL)
     source_path = download_sharepoint_file(token, item, SOURCE_FILENAME)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    destination = REPORTS_DIR / f"inventory-upload-boxes-{date.today().isoformat()}.xlsx"
+    run_date = current_local_date()
+    normalized_path = source_path.with_name(f"{source_path.stem}-normalizado.xlsx")
+    destination = REPORTS_DIR / f"inventory-upload-boxes-{run_date.isoformat()}.xlsx"
 
-    changed = normalize_date_formats(source_path, destination)
-    print(f"Archivo de SharePoint descargado y normalizado: {destination} ({changed} fechas)", flush=True)
-    return destination
+    changed = normalize_date_formats(source_path, normalized_path)
+    result = transform_inventory_workbook(
+        normalized_path,
+        destination,
+        assumed_today=run_date,
+    )
+    if result.final_sunday_rows or result.final_immediate_rows or not result.copied_data_correct:
+        raise RuntimeError(
+            "La validación del XLS transformado falló: "
+            f"domingos={result.final_sunday_rows}, "
+            f"fechas_en_ventana={result.final_immediate_rows}, "
+            f"datos_copiados_correctos={result.copied_data_correct}."
+        )
+    print(
+        f"XLS preparado desde SharePoint: {destination} | "
+        f"hoy={run_date.isoformat()} filas_originales={result.original_rows} "
+        f"filas_eliminadas={result.removed_rows} filas_agregadas={result.added_rows} "
+        f"fechas_normalizadas={changed}",
+        flush=True,
+    )
+    return token, item, destination
 
 
 def normalize_date_formats(source_path: Path, destination: Path) -> int:
@@ -412,7 +443,13 @@ def normalize_date_formats(source_path: Path, destination: Path) -> int:
 def run() -> None:
     komet_user = required_secret("KOMET_USER")
     komet_password = required_secret("KOMET_PASSWORD")
-    source_path = download_and_normalize_source()
+    sharepoint_token, sharepoint_item, source_path = download_and_prepare_source()
+    upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
+    print(
+        "Información del Excel actualizada en el mismo archivo de SharePoint; "
+        "se usará esa versión para Kometsales.",
+        flush=True,
+    )
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
