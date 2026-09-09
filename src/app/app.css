@@ -57,6 +57,7 @@
 .workflow-card.tertiary::before { background: linear-gradient(90deg, #743b30, #a66552); }
 .workflow-card.quaternary::before { background: linear-gradient(90deg, #51477c, #7d70ad); }
 .workflow-card.quinary::before { background: linear-gradient(90deg, #946511, #c58c28); }
+.workflow-card.senary::before { background: linear-gradient(90deg, #256d80, #45a1b5); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; }
 
@@ -75,6 +76,7 @@
 .tertiary .bot-icon { color: #fff; background: linear-gradient(145deg, #8a493b, #613027); box-shadow: 0 7px 16px rgba(97, 48, 39, .2); }
 .quaternary .bot-icon { color: #fff; background: linear-gradient(145deg, #665a91, #443b6b); box-shadow: 0 7px 16px rgba(68, 59, 107, .2); }
 .quinary .bot-icon { color: #fff; background: linear-gradient(145deg, #b27a18, #80530c); box-shadow: 0 7px 16px rgba(128, 83, 12, .2); }
+.senary .bot-icon { color: #fff; background: linear-gradient(145deg, #357f92, #256d80); box-shadow: 0 7px 16px rgba(37, 109, 128, .2); }
 .bot-icon svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .card-actions { display: flex; align-items: center; gap: 7px; }
@@ -167,11 +169,13 @@
 .tertiary .run-button { background: linear-gradient(135deg, #8a493b, #613027); }
 .quaternary .run-button { background: linear-gradient(135deg, #665a91, #443b6b); }
 .quinary .run-button { background: linear-gradient(135deg, #b27a18, #80530c); }
+.senary .run-button { background: linear-gradient(135deg, #357f92, #256d80); }
 .run-button:hover:not(:disabled) { background: #0f553c; transform: translateY(-1px); }
 .secondary .run-button:hover:not(:disabled) { background: #172c38; }
 .tertiary .run-button:hover:not(:disabled) { background: #51251e; }
 .quaternary .run-button:hover:not(:disabled) { background: #352d58; }
 .quinary .run-button:hover:not(:disabled) { background: #684208; }
+.senary .run-button:hover:not(:disabled) { background: #1c5967; }
 .run-button:disabled { cursor: not-allowed; opacity: 0.52; }
 .run-button svg { width: 16px; fill: currentColor; }
 

@@ -1,0 +1,58 @@
+name: Bot Subir XLS Cajas
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: kometsales-inventory-boxes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  inventory-boxes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Vaciar y subir inventario de cajas
+        env:
+          KOMET_USER: ${{ secrets.KOMET_USER }}
+          KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+        run: python -u bot/inventory_boxes.py
+
+      - name: Guardar capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-inventory-boxes-${{ github.run_number }}
+          path: artifacts/inventory_boxes/capturas/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar XLS cargado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-inventory-boxes-${{ github.run_number }}
+          path: artifacts/inventory_boxes/reportes/*.xlsx
+          if-no-files-found: warn
+          retention-days: 7
