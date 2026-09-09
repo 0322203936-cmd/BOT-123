@@ -98,6 +98,15 @@ const workflows = {
 };
 
 const lastDispatch = new Map();
+const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
+const defaultCajasEmailConfig = {
+  recipients: [],
+  cc: [],
+  bcc: [],
+  subject: 'Reporte de inventario de cajas',
+  bodyHtml: '<p>Hola,</p><p>Adjunto encontrarás el reporte actualizado de inventario de cajas.</p><p>Saludos.</p>',
+  logoUrl: '',
+};
 
 const reportMatchers = {
   galleria: [
@@ -154,6 +163,7 @@ const artifactNameMatchers = {
 
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
+app.use('/api/workflows/cajas/email-config', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '10kb' }));
 
 function passwordsMatch(received) {
@@ -291,6 +301,102 @@ function extractZipEntry(archive, entry) {
   return data;
 }
 
+function emailList(value, field) {
+  if (!Array.isArray(value)) {
+    const error = new Error(`El campo ${field} debe ser una lista de correos.`);
+    error.status = 400;
+    throw error;
+  }
+  if (value.length > 100) {
+    const error = new Error(`El campo ${field} no puede tener más de 100 correos.`);
+    error.status = 400;
+    throw error;
+  }
+  const result = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      const error = new Error(`El campo ${field} contiene un correo inválido.`);
+      error.status = 400;
+      throw error;
+    }
+    const address = item.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      const error = new Error(`El campo ${field} contiene un correo inválido.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!result.some((existing) => existing.toLowerCase() === address.toLowerCase())) {
+      result.push(address);
+    }
+  }
+  return result;
+}
+
+function normalizeCajasEmailConfig(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    const error = new Error('La configuración del correo debe ser un objeto.');
+    error.status = 400;
+    throw error;
+  }
+  const recipients = emailList(value.recipients, 'recipients');
+  if (!recipients.length) {
+    const error = new Error('Agrega al menos un destinatario.');
+    error.status = 400;
+    throw error;
+  }
+  const cc = emailList(value.cc || [], 'cc');
+  const bcc = emailList(value.bcc || [], 'bcc');
+  const subject = typeof value.subject === 'string' ? value.subject.trim() : '';
+  const bodyHtml = typeof value.bodyHtml === 'string' ? value.bodyHtml : '';
+  const logoUrl = typeof value.logoUrl === 'string' ? value.logoUrl.trim() : '';
+  if (!subject || subject.length > 200) {
+    const error = new Error('El asunto es obligatorio y debe tener hasta 200 caracteres.');
+    error.status = 400;
+    throw error;
+  }
+  if (!bodyHtml.trim() || bodyHtml.length > 100_000) {
+    const error = new Error('El contenido del correo es obligatorio y demasiado grande.');
+    error.status = 400;
+    throw error;
+  }
+  if (/<\/?script\b|\son\w+\s*=|javascript:/i.test(bodyHtml)) {
+    const error = new Error('El contenido del correo incluye HTML no permitido.');
+    error.status = 400;
+    throw error;
+  }
+  if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
+    const error = new Error('La URL del logo debe comenzar con http:// o https://.');
+    error.status = 400;
+    throw error;
+  }
+  const config = { recipients, cc, bcc, subject, bodyHtml, logoUrl };
+  if (Buffer.byteLength(JSON.stringify(config), 'utf8') > 40_000) {
+    const error = new Error('La configuración del correo es demasiado grande para GitHub Actions.');
+    error.status = 400;
+    throw error;
+  }
+  return config;
+}
+
+async function readCajasEmailConfig(workflow) {
+  try {
+    const variable = await githubRequest(
+      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/variables/${encodeURIComponent(cajasEmailVariable)}`,
+    );
+    const config = normalizeCajasEmailConfig(JSON.parse(variable.value));
+    return { config, configured: true };
+  } catch (error) {
+    if (error.status === 404) {
+      return { config: { ...defaultCajasEmailConfig }, configured: false };
+    }
+    if (error instanceof SyntaxError) {
+      error.message = 'La variable CAJAS_EMAIL_CONFIG no contiene un JSON válido.';
+      error.status = 502;
+    }
+    throw error;
+  }
+}
+
 function findReportEntry(entries, matchers) {
   for (const matcher of matchers) {
     const file = entries.find((entry) => !entry.directory && matcher(entry.name));
@@ -382,6 +488,40 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/config', (_req, res) => {
   res.json({ authRequired: Boolean(appPassword), configured: Boolean(githubToken) });
+});
+
+app.get('/api/workflows/cajas/email-config', authenticate, async (_req, res, next) => {
+  try {
+    const config = await readCajasEmailConfig(workflows.cajas);
+    res.json(config);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/workflows/cajas/email-config', authenticate, async (req, res, next) => {
+  try {
+    const config = normalizeCajasEmailConfig(req.body);
+    const variablePath = `/repos/${encodeURIComponent(workflows.cajas.owner)}/${encodeURIComponent(workflows.cajas.repo)}/actions/variables`;
+    const variableBody = JSON.stringify({ name: cajasEmailVariable, value: JSON.stringify(config) });
+    try {
+      await githubRequest(`${variablePath}/${encodeURIComponent(cajasEmailVariable)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: variableBody,
+      });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      await githubRequest(variablePath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: variableBody,
+      });
+    }
+    res.json({ config, message: 'Configuración del correo de Cajas guardada.' });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/workflows', authenticate, async (_req, res, next) => {
@@ -494,8 +634,10 @@ app.use((error, _req, res, _next) => {
   res.status(error.status || 500).json({ message: error.message || 'Error interno del servidor.' });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Atajos Globales disponible en el puerto ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Atajos Globales disponible en el puerto ${port}`);
+  });
+}
 
 module.exports = app;

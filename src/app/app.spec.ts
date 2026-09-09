@@ -43,4 +43,42 @@ describe('App', () => {
     expect(compiled.querySelector('.run-button')?.textContent).toContain('Ejecutar');
     http.verify();
   });
+
+  it('should show the email editor only for the Cajas workflow', async () => {
+    const fixture = TestBed.createComponent(App);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+
+    http.expectOne('/api/config').flush({ authRequired: false, configured: true });
+    await Promise.resolve();
+    http.expectOne('/api/workflows').flush({
+      workflows: [
+        {
+          key: 'galleria',
+          name: 'Reporte Galleria',
+          description: 'Prueba',
+          schedule: 'Diario',
+          run: null,
+        },
+        {
+          key: 'cajas',
+          name: 'Subir XLS Cajas',
+          description: 'Prueba',
+          schedule: 'Manual',
+          run: null,
+        },
+      ],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.querySelectorAll('.email-button')).toHaveLength(1);
+    expect(compiled.querySelector('.workflow-card:not(.senary) .email-button')).toBeNull();
+
+    (compiled.querySelector('.email-button') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(http.expectOne('/api/workflows/cajas/email-config')).toBeTruthy();
+    http.verify();
+  });
 });
