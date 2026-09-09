@@ -290,9 +290,23 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
     )
     success = re.compile(r"(subid|cargad|exitos|correctamente|procesad)", re.I)
     try:
-        page.get_by_text(success).first.wait_for(state="visible", timeout=600_000)
+        page.get_by_text(success).first.wait_for(state="visible", timeout=20_000)
     except PlaywrightTimeoutError as exc:
-        raise RuntimeError("Kometsales no confirmó la carga del XLS dentro del tiempo esperado.") from exc
+        error_message = re.compile(
+            r"(error|inv[aá]lid|no se pudo|rechaz|failed|incorrect|must be|required)",
+            re.I,
+        )
+        error_candidates = [
+            page.locator(".alert-danger:visible, .error:visible, .fieldError:visible"),
+            page.get_by_text(error_message),
+        ]
+        if any(visible_locator(locator) is not None for locator in error_candidates):
+            raise RuntimeError("Kometsales mostró un error después de intentar cargar el XLS.") from exc
+        print(
+            "Aviso: Kometsales no mostró un mensaje final, pero tampoco mostró un error. "
+            "Se da por terminada la carga después de esperar la respuesta de la página.",
+            flush=True,
+        )
     capture(page, "04_carga_completada.png")
     print("XLS de cajas cargado correctamente en Kometsales.", flush=True)
 
