@@ -30,6 +30,8 @@ REPORTS_DIR = ARTIFACTS_DIR / "reportes"
 SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
 MAX_DELETE_BATCHES = 50
+CONFIRMATION_DIALOG_WAIT_MS = 12_000
+DELETE_BATCH_SETTLE_MS = 7_000
 
 
 def required_secret(name: str) -> str:
@@ -190,28 +192,12 @@ def select_all_inventory(page: Page) -> None:
     print("Todas las cajas visibles fueron seleccionadas mediante AWB.", flush=True)
 
 
-def confirm_mass_delete(page: Page) -> None:
-    click_first_visible(
-        page,
-        [
-            page.locator("#inventoryPricingActions"),
-            page.get_by_role("button", name=re.compile(r"acciones", re.I)),
-        ],
-        "Acciones",
-    )
-    click_first_visible(
-        page,
-        [
-            page.get_by_text(re.compile(r"Borrar\s+inventario\s+masivamente", re.I)),
-            page.get_by_role("menuitem", name=re.compile(r"Borrar\s+inventario\s+masivamente", re.I)),
-        ],
-        "Borrar inventario masivamente",
-    )
-    page.wait_for_timeout(500)
-
+def confirmation_input(page: Page):
     dialog = page.get_by_role("dialog")
+    modal = page.locator(".modal:visible, .ui-dialog:visible")
     input_candidates = [
-        dialog.locator('input[type="text"], input:not([type])'),
+        dialog.locator('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea'),
+        modal.locator('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea'),
         page.locator('input[placeholder*="CONFIRMAR" i], input[name*="confirm" i]'),
     ]
     confirmation_prompt = page.get_by_text(re.compile(r"CONFIRMAR", re.I))
@@ -220,20 +206,69 @@ def confirm_mass_delete(page: Page) -> None:
         input_candidates.extend(
             [
                 prompt.locator("xpath=ancestor::*[@role='dialog'][1]").locator(
-                    'input[type="text"], input:not([type])'
+                    'input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea'
                 ),
-                prompt.locator("xpath=..").locator('input[type="text"], input:not([type])'),
-                prompt.locator("xpath=../..").locator('input[type="text"], input:not([type])'),
+                prompt.locator("xpath=..").locator(
+                    'input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea'
+                ),
+                prompt.locator("xpath=../..").locator(
+                    'input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea'
+                ),
             ]
         )
-    confirmation_input = None
     for locator in input_candidates:
-        confirmation_input = visible_locator(locator)
-        if confirmation_input is not None:
+        found = visible_locator(locator)
+        if found is not None:
+            return found
+    return None
+
+
+def wait_for_confirmation_input(page: Page):
+    attempts = CONFIRMATION_DIALOG_WAIT_MS // 500
+    for _ in range(attempts):
+        found = confirmation_input(page)
+        if found is not None:
+            return found
+        if inventory_is_empty(page):
+            return None
+        page.wait_for_timeout(500)
+    return None
+
+
+def confirm_mass_delete(page: Page) -> bool:
+    for attempt in range(1, 3):
+        click_first_visible(
+            page,
+            [
+                page.locator("#inventoryPricingActions"),
+                page.get_by_role("button", name=re.compile(r"acciones", re.I)),
+            ],
+            "Acciones",
+        )
+        click_first_visible(
+            page,
+            [
+                page.get_by_text(re.compile(r"Borrar\s+inventario\s+masivamente", re.I)),
+                page.get_by_role("menuitem", name=re.compile(r"Borrar\s+inventario\s+masivamente", re.I)),
+            ],
+            "Borrar inventario masivamente",
+        )
+        confirmation_field = wait_for_confirmation_input(page)
+        if confirmation_field is not None:
             break
-    if confirmation_input is None:
-        raise RuntimeError("La ventana de borrado masivo no mostró el campo de confirmación.")
-    confirmation_input.fill("CONFIRMAR")
+        if inventory_is_empty(page):
+            print("Kometsales ya no muestra cajas para borrar.", flush=True)
+            return False
+        if attempt == 1:
+            print("Aviso: el cuadro de confirmación tardó en abrir; reintentando la acción.", flush=True)
+            page.wait_for_timeout(2_000)
+    else:
+        raise RuntimeError(
+            "La ventana de borrado masivo no mostró el campo de confirmación después de reintentar."
+        )
+
+    confirmation_field.fill("CONFIRMAR")
+    dialog = page.get_by_role("dialog")
     click_first_visible(
         page,
         [
@@ -244,6 +279,7 @@ def confirm_mass_delete(page: Page) -> None:
         ],
         "Confirmar borrado masivo",
     )
+    return True
 
 
 def delete_all_inventory(page: Page) -> None:
@@ -253,9 +289,13 @@ def delete_all_inventory(page: Page) -> None:
             return
         print(f"Borrado masivo lote {batch}...", flush=True)
         select_all_inventory(page)
-        confirm_mass_delete(page)
+        if not confirm_mass_delete(page):
+            return
+        page.wait_for_timeout(1_000)
         wait_for_network(page)
-        page.wait_for_timeout(3_000)
+        # Kometsales termina el borrado en segundo plano. Esperar evita abrir
+        # el siguiente cuadro mientras aún se está actualizando la tabla.
+        page.wait_for_timeout(DELETE_BATCH_SETTLE_MS)
         capture(page, f"02_borrado_{batch:02d}.png")
     raise RuntimeError(f"El inventario no quedó vacío después de {MAX_DELETE_BATCHES} lotes.")
 
