@@ -1,6 +1,6 @@
 # Atajos Globales
 
-Panel Angular para ejecutar manualmente **Bot Galleria Farms**, **Bot Cancelaciones** y el nuevo flujo **Pegar Data**.
+Panel Angular para ejecutar manualmente los bots de Galleria, Posco y el flujo de inventario de cajas de Kometsales.
 
 La aplicación usa un servidor Node/Express para que el token de GitHub nunca llegue al navegador. El mismo servidor entrega la compilación de Angular, por lo que se despliega como un solo Web Service en Render.
 
@@ -19,6 +19,20 @@ El workflow manual está en `.github/workflows/pegar-data.yml` y requiere estos 
 - `POSCO_PASSWORD`
 
 Las credenciales de SharePoint se agregarán cuando se implemente la etapa de actualización del archivo `.xlsm`; nunca deben guardarse en archivos del repositorio.
+
+## Bot Subir XLS Cajas
+
+El botón **Subir XLS Cajas** descarga el archivo `Inventory Upload Boxes 050926.xlsx` desde SharePoint, normaliza el formato de `Available From`, entra a Kometsales, selecciona `PACIFICA FARMS - CAL`, vacía el inventario de cajas y sube el XLS.
+
+El workflow está en `.github/workflows/inventory-boxes.yml` y requiere estos secretos en `BOT-123`:
+
+- `KOMET_USER`
+- `KOMET_PASSWORD`
+- `SHAREPOINT_TENANT_ID`
+- `SHAREPOINT_CLIENT_ID`
+- `SHAREPOINT_CLIENT_SECRET`
+
+El botón solicita `CONFIRMAR` antes de enviarlo a GitHub Actions porque el proceso elimina el inventario existente.
 
 ## Configuración local
 

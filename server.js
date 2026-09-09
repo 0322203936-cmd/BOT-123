@@ -86,6 +86,15 @@ const workflows = {
     description: 'Descarga reporte de Posco y lo pega en la hoja DataReq omitiendo columna N.',
     schedule: 'Ejecución manual',
   },
+  cajas: {
+    owner,
+    repo: process.env.CAJAS_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'inventory-boxes.yml',
+    name: 'Subir XLS Cajas',
+    description: 'Vacía el inventario de Kometsales y sube el XLS actualizado desde SharePoint.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();
@@ -115,6 +124,9 @@ const reportMatchers = {
   dataReq: [
     (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
+  cajas: [
+    (name) => /(^|\/)inventory-upload-boxes-.*\.xlsx$/i.test(name),
+  ],
 };
 
 const artifactNameMatchers = {
@@ -137,6 +149,7 @@ const artifactNameMatchers = {
     (name) => name.startsWith('reportes-data-req-'),
     (name) => name === 'evidencias-posco-datareq',
   ],
+  cajas: [(name) => name.startsWith('reportes-inventory-boxes-')],
 };
 
 app.disable('x-powered-by');
