@@ -15,6 +15,7 @@ from sharepoint_sync import (
     resolve_sharepoint_item_by_url,
     upload_sharepoint_file,
 )
+from email_sender import load_email_config, send_report_email
 from inventory_box_transform import transform_inventory_workbook
 
 
@@ -443,6 +444,8 @@ def normalize_date_formats(source_path: Path, destination: Path) -> int:
 def run() -> None:
     komet_user = required_secret("KOMET_USER")
     komet_password = required_secret("KOMET_PASSWORD")
+    email_config = load_email_config(os.environ.get("CAJAS_EMAIL_CONFIG"))
+    sender = required_secret("MAIL_SENDER") if email_config else ""
     sharepoint_token, sharepoint_item, source_path = download_and_prepare_source()
     upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
     print(
@@ -468,6 +471,15 @@ def run() -> None:
         finally:
             context.close()
             browser.close()
+
+    if not email_config:
+        print(
+            "Correo omitido: todavía no existe una configuración CAJAS_EMAIL_CONFIG.",
+            flush=True,
+        )
+        return
+
+    send_report_email(email_config, sender, source_path, token=sharepoint_token)
 
 
 if __name__ == "__main__":

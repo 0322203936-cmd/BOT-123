@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { EditorComponent } from '@tinymce/tinymce-angular';
 import { firstValueFrom } from 'rxjs';
 
 type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas';
@@ -30,9 +31,32 @@ interface ApiConfig {
   configured: boolean;
 }
 
+interface CajasEmailConfig {
+  recipients: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  bodyHtml: string;
+  logoUrl: string;
+}
+
+interface CajasEmailConfigResponse {
+  config: CajasEmailConfig;
+  configured: boolean;
+}
+
+const defaultCajasEmailConfig: CajasEmailConfig = {
+  recipients: [],
+  cc: [],
+  bcc: [],
+  subject: 'Reporte de inventario de cajas',
+  bodyHtml: '<p>Hola,</p><p>Adjunto encontrarás el reporte actualizado de inventario de cajas.</p><p>Saludos.</p>',
+  logoUrl: '',
+};
+
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, EditorComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
@@ -50,6 +74,31 @@ export class App implements OnInit, OnDestroy {
   protected readonly authenticated = signal(false);
   protected readonly configured = signal(true);
   protected readonly clock = signal(Date.now());
+  protected readonly emailPanelOpen = signal(false);
+  protected readonly emailLoading = signal(false);
+  protected readonly emailSaving = signal(false);
+  protected readonly emailConfigured = signal(false);
+  protected readonly emailEditorInit: EditorComponent['init'] = {
+    height: 280,
+    menubar: false,
+    branding: false,
+    promotion: false,
+    plugins: 'lists link image table code',
+    toolbar:
+      'undo redo | blocks | bold italic underline | alignleft aligncenter alignright | bullist numlist | link image table | code',
+    image_title: true,
+    automatic_uploads: false,
+    base_url: '/tinymce',
+    suffix: '.min',
+    link_default_target: '_blank',
+    content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; color: #24322d; }',
+  };
+  protected emailTo = '';
+  protected emailCc = '';
+  protected emailBcc = '';
+  protected emailSubject = defaultCajasEmailConfig.subject;
+  protected emailBodyHtml = defaultCajasEmailConfig.bodyHtml;
+  protected emailLogoUrl = '';
   protected password = '';
 
   private refreshTimer?: ReturnType<typeof setInterval>;
@@ -196,6 +245,67 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
+  protected async openEmailPanel(workflow: WorkflowStatus): Promise<void> {
+    if (workflow.key !== 'cajas' || this.emailLoading()) return;
+
+    this.emailPanelOpen.set(true);
+    this.emailLoading.set(true);
+    this.error.set('');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<CajasEmailConfigResponse>('/api/workflows/cajas/email-config', {
+          headers: this.authHeaders(),
+        }),
+      );
+      this.setEmailConfig(response.config);
+      this.emailConfigured.set(response.configured);
+    } catch (error) {
+      this.emailPanelOpen.set(false);
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.emailLoading.set(false);
+    }
+  }
+
+  protected closeEmailPanel(): void {
+    if (!this.emailSaving()) this.emailPanelOpen.set(false);
+  }
+
+  protected async saveEmailConfig(): Promise<void> {
+    const recipients = this.parseEmailList(this.emailTo);
+    if (!recipients.length) {
+      this.error.set('Agrega al menos un destinatario.');
+      return;
+    }
+
+    this.emailSaving.set(true);
+    this.error.set('');
+    try {
+      const response = await firstValueFrom(
+        this.http.put<{ config: CajasEmailConfig; message: string }>(
+          '/api/workflows/cajas/email-config',
+          {
+            recipients,
+            cc: this.parseEmailList(this.emailCc),
+            bcc: this.parseEmailList(this.emailBcc),
+            subject: this.emailSubject,
+            bodyHtml: this.emailBodyHtml,
+            logoUrl: this.emailLogoUrl,
+          },
+          { headers: this.authHeaders() },
+        ),
+      );
+      this.setEmailConfig(response.config);
+      this.emailConfigured.set(true);
+      this.message.set(response.message);
+      this.emailPanelOpen.set(false);
+    } catch (error) {
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.emailSaving.set(false);
+    }
+  }
+
   private downloadFilename(contentDisposition: string | null): string {
     if (!contentDisposition) return '';
     const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
@@ -207,6 +317,20 @@ export class App implements OnInit, OnDestroy {
       }
     }
     return contentDisposition.match(/filename="([^"]+)"/i)?.[1] || '';
+  }
+
+  private setEmailConfig(config: CajasEmailConfig): void {
+    const value = { ...defaultCajasEmailConfig, ...config };
+    this.emailTo = value.recipients.join(', ');
+    this.emailCc = value.cc.join(', ');
+    this.emailBcc = value.bcc.join(', ');
+    this.emailSubject = value.subject;
+    this.emailBodyHtml = value.bodyHtml;
+    this.emailLogoUrl = value.logoUrl;
+  }
+
+  private parseEmailList(value: string): string[] {
+    return [...new Set(value.split(/[,;\n]/).map((item) => item.trim()).filter(Boolean))];
   }
 
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {

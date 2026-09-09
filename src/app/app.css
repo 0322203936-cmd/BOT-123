@@ -80,6 +80,20 @@
 .bot-icon svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .card-actions { display: flex; align-items: center; gap: 7px; }
+.email-button {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  color: #256d80;
+  background: #edf7f8;
+  border: 1px solid #c9e2e6;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.email-button:hover:not(:disabled) { color: #174e5b; background: #dceff2; }
+.email-button:disabled { cursor: wait; opacity: .55; }
+.email-button svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .status {
   display: inline-flex;
@@ -203,6 +217,45 @@
 .login-card button { height: 48px; margin-top: 4px; color: white; background: #176b4d; border: 0; cursor: pointer; font-weight: 750; }
 .login-card .alert { margin: 18px 0 0; }
 
+.modal-backdrop {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(23, 33, 29, .46);
+}
+.email-panel {
+  width: min(850px, 100%);
+  max-height: min(92vh, 820px);
+  overflow: auto;
+  padding: 28px;
+  background: #fff;
+  border: 1px solid #dce5e0;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(18, 39, 30, .25);
+}
+.panel-heading { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.eyebrow { margin: 0 0 7px; color: #256d80; font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
+.panel-heading h2 { margin: 0; color: #17211d; font-size: 25px; }
+.panel-help, .panel-note { margin: 8px 0 0; color: #6c7972; font-size: 12px; line-height: 1.5; }
+.panel-note { margin: 0 0 16px; padding: 10px 12px; color: #765919; background: #fff8e8; border: 1px solid #f1dfad; border-radius: 7px; }
+.close-button { width: 32px; height: 32px; color: #65706b; background: #f4f7f5; border: 1px solid #dce5e0; border-radius: 50%; cursor: pointer; font-size: 22px; line-height: 1; }
+.panel-loading { display: flex; align-items: center; gap: 10px; min-height: 260px; justify-content: center; color: #65706b; font-size: 13px; }
+.email-form { display: grid; gap: 15px; }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.email-form label { display: grid; gap: 7px; color: #4e5a54; font-size: 12px; font-weight: 700; }
+.email-form input { width: 100%; box-sizing: border-box; height: 42px; padding: 0 11px; color: #25322d; background: #fbfdfc; border: 1px solid #cdd9d3; border-radius: 7px; font: inherit; font-size: 12px; }
+.email-form input:focus { outline: 2px solid rgba(37, 109, 128, .2); border-color: #357f92; }
+.editor-label editor { display: block; overflow: hidden; border: 1px solid #cdd9d3; border-radius: 7px; }
+.logo-preview { max-width: 180px; max-height: 70px; object-fit: contain; object-position: left center; }
+.panel-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.secondary-button, .save-button { min-height: 42px; padding: 0 15px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.secondary-button { color: #52615a; background: #f3f6f4; border: 1px solid #d7e0db; }
+.save-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; color: #fff; background: #256d80; border: 0; }
+.secondary-button:disabled, .save-button:disabled { cursor: wait; opacity: .6; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .25; } }
 
@@ -217,6 +270,10 @@
   .workflow-grid { grid-template-columns: 1fr; }
   .workflow-card { padding: 20px; }
   .login-card { margin-top: 60px; padding: 28px; }
+  .email-panel { padding: 21px; }
+  .field-grid { grid-template-columns: 1fr; }
+  .panel-actions { flex-direction: column-reverse; }
+  .secondary-button, .save-button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

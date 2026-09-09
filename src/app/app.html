@@ -48,6 +48,18 @@
               }
             </div>
             <div class="card-actions">
+              @if (workflow.key === 'cajas') {
+                <button
+                  class="email-button"
+                  type="button"
+                  aria-label="Configurar correo de Cajas"
+                  title="Configurar correo de Cajas"
+                  [disabled]="emailLoading()"
+                  (click)="openEmailPanel(workflow)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM4 7l8 6 8-6" /></svg>
+                </button>
+              }
               <span class="status" [ngClass]="statusClass(workflow.run)">
                 <i></i>{{ statusLabel(workflow.run) }}
               </span>
@@ -111,6 +123,71 @@
         </article>
       }
     </section>
+
+    @if (emailPanelOpen()) {
+      <div class="modal-backdrop" role="presentation" (click)="closeEmailPanel()">
+        <section class="email-panel" role="dialog" aria-modal="true" aria-labelledby="email-panel-title" (click)="$event.stopPropagation()">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Solo para Subir XLS Cajas</p>
+              <h2 id="email-panel-title">Correo del reporte</h2>
+              <p class="panel-help">Se enviará automáticamente cuando la ejecución termine correctamente.</p>
+            </div>
+            <button class="close-button" type="button" aria-label="Cerrar" (click)="closeEmailPanel()">×</button>
+          </div>
+
+          @if (emailLoading()) {
+            <div class="panel-loading"><span class="button-loader dark"></span> Cargando configuración…</div>
+          } @else {
+            @if (!emailConfigured()) {
+              <p class="panel-note">Aún no hay una configuración guardada. Completa los campos y presiona Guardar.</p>
+            }
+            <form class="email-form" (ngSubmit)="saveEmailConfig()">
+              <div class="field-grid">
+                <label>
+                  Para
+                  <input name="emailTo" type="text" [(ngModel)]="emailTo" placeholder="correo@empresa.com, otro@empresa.com" required />
+                </label>
+                <label>
+                  CC
+                  <input name="emailCc" type="text" [(ngModel)]="emailCc" placeholder="Opcional" />
+                </label>
+                <label>
+                  CCO
+                  <input name="emailBcc" type="text" [(ngModel)]="emailBcc" placeholder="Opcional" />
+                </label>
+                <label>
+                  Asunto
+                  <input name="emailSubject" type="text" [(ngModel)]="emailSubject" maxlength="200" required />
+                </label>
+              </div>
+              <label>
+                Logo por URL
+                <input name="emailLogoUrl" type="url" [(ngModel)]="emailLogoUrl" placeholder="https://.../logo.png" />
+              </label>
+              @if (emailLogoUrl) {
+                <img class="logo-preview" [src]="emailLogoUrl" alt="Vista previa del logo" />
+              }
+              <label class="editor-label">
+                Mensaje
+                <editor
+                  name="emailBodyHtml"
+                  licenseKey="gpl"
+                  [(ngModel)]="emailBodyHtml"
+                  [init]="emailEditorInit"
+                ></editor>
+              </label>
+              <div class="panel-actions">
+                <button class="secondary-button" type="button" [disabled]="emailSaving()" (click)="closeEmailPanel()">Cancelar</button>
+                <button class="save-button" type="submit" [disabled]="emailSaving()">
+                  @if (emailSaving()) { <span class="button-loader"></span> Guardando… } @else { Guardar configuración }
+                </button>
+              </div>
+            </form>
+          }
+        </section>
+      </div>
+    }
 
   }
 </main>
