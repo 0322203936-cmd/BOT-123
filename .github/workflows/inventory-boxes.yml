@@ -2,6 +2,9 @@ name: Bot Subir XLS Cajas
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
+      timezone: "America/Tijuana"
 
 concurrency:
   group: kometsales-inventory-boxes
