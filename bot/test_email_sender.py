@@ -91,6 +91,11 @@ class EmailSenderTests(unittest.TestCase):
 
         self.assertIn('src="cid:cajas-logo"', message["body"]["content"])
         self.assertNotIn("data:image/png", message["body"]["content"])
+        self.assertTrue(message["body"]["content"].rstrip().endswith("</p>"))
+        self.assertGreater(
+            message["body"]["content"].rfind('src="cid:cajas-logo"'),
+            message["body"]["content"].find("El archivo está listo."),
+        )
 
     def test_loads_sharepoint_logo_reference(self):
         config = load_email_config(
@@ -132,6 +137,10 @@ class EmailSenderTests(unittest.TestCase):
         )
 
         self.assertIn('src="cid:cajas-logo"', message["body"]["content"])
+        self.assertGreater(
+            message["body"]["content"].rfind('src="cid:cajas-logo"'),
+            message["body"]["content"].find("Listo"),
+        )
 
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)

@@ -186,7 +186,7 @@ def build_graph_message(config: dict) -> dict:
         "subject": config["subject"],
         "body": {
             "contentType": "HTML",
-            "content": logo_html + config["bodyHtml"],
+            "content": config["bodyHtml"] + logo_html,
         },
         "toRecipients": _graph_recipients(config["recipients"]),
         "ccRecipients": _graph_recipients(config["cc"]),
