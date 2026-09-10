@@ -37,7 +37,10 @@ interface CajasEmailConfig {
   bcc: string[];
   subject: string;
   bodyHtml: string;
-  logoUrl: string;
+  logoUrl?: string;
+  logoData: string;
+  logoName: string;
+  logoContentType: string;
 }
 
 interface CajasEmailConfigResponse {
@@ -52,7 +55,13 @@ const defaultCajasEmailConfig: CajasEmailConfig = {
   subject: 'Reporte de inventario de cajas',
   bodyHtml: '<p>Hola,</p><p>Adjunto encontrarás el reporte actualizado de inventario de cajas.</p><p>Saludos.</p>',
   logoUrl: '',
+  logoData: '',
+  logoName: '',
+  logoContentType: '',
 };
+
+const MAX_EMAIL_LOGO_BYTES = 24 * 1024;
+const EMAIL_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
 
 @Component({
   selector: 'app-root',
@@ -98,7 +107,11 @@ export class App implements OnInit, OnDestroy {
   protected emailBcc = '';
   protected emailSubject = defaultCajasEmailConfig.subject;
   protected emailBodyHtml = defaultCajasEmailConfig.bodyHtml;
-  protected emailLogoUrl = '';
+  protected emailLogoData = '';
+  protected emailLogoName = '';
+  protected emailLogoContentType = '';
+  protected emailLogoPreview = '';
+  protected emailLegacyLogoUrl = '';
   protected password = '';
 
   private refreshTimer?: ReturnType<typeof setInterval>;
@@ -290,7 +303,10 @@ export class App implements OnInit, OnDestroy {
             bcc: this.parseEmailList(this.emailBcc),
             subject: this.emailSubject,
             bodyHtml: this.emailBodyHtml,
-            logoUrl: this.emailLogoUrl,
+            logoData: this.emailLogoData,
+            logoName: this.emailLogoName,
+            logoContentType: this.emailLogoContentType,
+            logoUrl: this.emailLogoData ? '' : this.emailLegacyLogoUrl,
           },
           { headers: this.authHeaders() },
         ),
@@ -304,6 +320,47 @@ export class App implements OnInit, OnDestroy {
     } finally {
       this.emailSaving.set(false);
     }
+  }
+
+  protected onLogoSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    if (!EMAIL_LOGO_TYPES.has(file.type)) {
+      input.value = '';
+      this.error.set('El logo debe ser PNG, JPG, GIF o BMP.');
+      return;
+    }
+    if (file.size > MAX_EMAIL_LOGO_BYTES) {
+      input.value = '';
+      this.error.set('El logo debe pesar como máximo 24 KB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        this.error.set('No fue posible leer el archivo del logo.');
+        return;
+      }
+      this.emailLogoData = reader.result;
+      this.emailLogoName = file.name;
+      this.emailLogoContentType = file.type;
+      this.emailLogoPreview = reader.result;
+      this.emailLegacyLogoUrl = '';
+      this.error.set('');
+    };
+    reader.onerror = () => this.error.set('No fue posible leer el archivo del logo.');
+    reader.readAsDataURL(file);
+  }
+
+  protected clearLogo(): void {
+    this.emailLogoData = '';
+    this.emailLogoName = '';
+    this.emailLogoContentType = '';
+    this.emailLogoPreview = '';
+    this.emailLegacyLogoUrl = '';
   }
 
   private downloadFilename(contentDisposition: string | null): string {
@@ -326,7 +383,11 @@ export class App implements OnInit, OnDestroy {
     this.emailBcc = value.bcc.join(', ');
     this.emailSubject = value.subject;
     this.emailBodyHtml = value.bodyHtml;
-    this.emailLogoUrl = value.logoUrl;
+    this.emailLogoData = value.logoData;
+    this.emailLegacyLogoUrl = value.logoUrl || '';
+    this.emailLogoName = value.logoName || (this.emailLegacyLogoUrl ? 'Logo guardado anteriormente' : '');
+    this.emailLogoContentType = value.logoContentType;
+    this.emailLogoPreview = value.logoData || this.emailLegacyLogoUrl;
   }
 
   private parseEmailList(value: string): string[] {

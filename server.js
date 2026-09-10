@@ -99,6 +99,8 @@ const workflows = {
 
 const lastDispatch = new Map();
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
+const maxInlineLogoBytes = 24 * 1024;
+const inlineLogoTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
 const defaultCajasEmailConfig = {
   recipients: [],
   cc: [],
@@ -106,6 +108,9 @@ const defaultCajasEmailConfig = {
   subject: 'Reporte de inventario de cajas',
   bodyHtml: '<p>Hola,</p><p>Adjunto encontrarás el reporte actualizado de inventario de cajas.</p><p>Saludos.</p>',
   logoUrl: '',
+  logoData: '',
+  logoName: '',
+  logoContentType: '',
 };
 
 const reportMatchers = {
@@ -349,6 +354,8 @@ function normalizeCajasEmailConfig(value) {
   const subject = typeof value.subject === 'string' ? value.subject.trim() : '';
   const bodyHtml = typeof value.bodyHtml === 'string' ? value.bodyHtml : '';
   const logoUrl = typeof value.logoUrl === 'string' ? value.logoUrl.trim() : '';
+  const logoData = typeof value.logoData === 'string' ? value.logoData.trim() : '';
+  let logoName = typeof value.logoName === 'string' ? value.logoName.trim() : '';
   if (!subject || subject.length > 200) {
     const error = new Error('El asunto es obligatorio y debe tener hasta 200 caracteres.');
     error.status = 400;
@@ -369,7 +376,53 @@ function normalizeCajasEmailConfig(value) {
     error.status = 400;
     throw error;
   }
-  const config = { recipients, cc, bcc, subject, bodyHtml, logoUrl };
+  let logoContentType = '';
+  if (logoData) {
+    const match = logoData.match(/^data:(image\/(?:png|jpeg|gif|bmp));base64,([A-Za-z0-9+/]*={0,2})$/i);
+    if (!match || match[2].length % 4 !== 0) {
+      const error = new Error('El logo debe ser una imagen PNG, JPG, GIF o BMP.');
+      error.status = 400;
+      throw error;
+    }
+    logoContentType = match[1].toLowerCase();
+    if (!inlineLogoTypes.has(logoContentType)) {
+      const error = new Error('El formato del logo no está permitido.');
+      error.status = 400;
+      throw error;
+    }
+    const logoBytes = Buffer.from(match[2], 'base64');
+    if (!logoBytes.length || logoBytes.length > maxInlineLogoBytes) {
+      const error = new Error('El logo debe pesar como máximo 24 KB.');
+      error.status = 400;
+      throw error;
+    }
+    if (!logoName) {
+      logoName = {
+        'image/png': 'logo.png',
+        'image/jpeg': 'logo.jpg',
+        'image/gif': 'logo.gif',
+        'image/bmp': 'logo.bmp',
+      }[logoContentType];
+    }
+    if (logoName.length > 100 || /[\\/\r\n]/.test(logoName)) {
+      const error = new Error('El nombre del logo no es válido.');
+      error.status = 400;
+      throw error;
+    }
+  } else {
+    logoName = '';
+  }
+  const config = {
+    recipients,
+    cc,
+    bcc,
+    subject,
+    bodyHtml,
+    logoUrl: logoData ? '' : logoUrl,
+    logoData,
+    logoName,
+    logoContentType,
+  };
   if (Buffer.byteLength(JSON.stringify(config), 'utf8') > 40_000) {
     const error = new Error('La configuración del correo es demasiado grande para GitHub Actions.');
     error.status = 400;
@@ -640,4 +693,5 @@ if (require.main === module) {
   });
 }
 
+app.normalizeCajasEmailConfig = normalizeCajasEmailConfig;
 module.exports = app;

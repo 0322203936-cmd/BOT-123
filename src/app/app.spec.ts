@@ -78,7 +78,86 @@ describe('App', () => {
 
     (compiled.querySelector('.email-button') as HTMLButtonElement).click();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(http.expectOne('/api/workflows/cajas/email-config')).toBeTruthy();
+    const configRequest = http.expectOne('/api/workflows/cajas/email-config');
+    configRequest.flush({
+      configured: false,
+      config: {
+        recipients: [],
+        cc: [],
+        bcc: [],
+        subject: 'Reporte de inventario de cajas',
+        bodyHtml: '<p>Listo</p>',
+        logoData: '',
+        logoName: '',
+        logoContentType: '',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(compiled.querySelector('input[type="file"]')).toBeTruthy();
+    expect(compiled.querySelector('input[type="url"]')).toBeNull();
+    http.verify();
+  });
+
+  it('should convert a selected logo into inline data', async () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance as any;
+    const input = document.createElement('input');
+    const file = new File(['logo'], 'logo.png', { type: 'image/png' });
+    Object.defineProperty(input, 'files', { value: [file] });
+
+    app.onLogoSelected({ target: input });
+    await new Promise<void>((resolve, reject) => {
+      const startedAt = Date.now();
+      const waitForReader = () => {
+        if (app.emailLogoData) {
+          resolve();
+        } else if (Date.now() - startedAt > 1000) {
+          reject(new Error('El FileReader no terminó a tiempo.'));
+        } else {
+          setTimeout(waitForReader, 10);
+        }
+      };
+      waitForReader();
+    });
+
+    expect(app.emailLogoName).toBe('logo.png');
+    expect(app.emailLogoContentType).toBe('image/png');
+    expect(app.emailLogoData).toBe('data:image/png;base64,bG9nbw==');
+    expect(app.emailLogoPreview).toBe('data:image/png;base64,bG9nbw==');
+  });
+
+  it('should preserve a legacy logo URL when saving without a new logo', async () => {
+    const fixture = TestBed.createComponent(App);
+    const http = TestBed.inject(HttpTestingController);
+    const app = fixture.componentInstance as any;
+    app.emailTo = 'destino@example.com';
+    app.emailSubject = 'Reporte';
+    app.emailBodyHtml = '<p>Listo</p>';
+    app.emailLogoData = '';
+    app.emailLogoName = '';
+    app.emailLogoContentType = '';
+    app.emailLegacyLogoUrl = 'https://example.com/logo.png';
+
+    const save = app.saveEmailConfig();
+    const request = http.expectOne('/api/workflows/cajas/email-config');
+    expect(request.request.body.logoUrl).toBe('https://example.com/logo.png');
+    request.flush({
+      config: {
+        recipients: ['destino@example.com'],
+        cc: [],
+        bcc: [],
+        subject: 'Reporte',
+        bodyHtml: '<p>Listo</p>',
+        logoUrl: 'https://example.com/logo.png',
+        logoData: '',
+        logoName: '',
+        logoContentType: '',
+      },
+      message: 'Guardado',
+    });
+    await save;
     http.verify();
   });
 });
