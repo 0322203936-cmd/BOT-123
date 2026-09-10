@@ -10,6 +10,10 @@ from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
 
+DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
+KOMET_SHEET_NAME = "Availability"
+
+
 @dataclass(frozen=True)
 class OutputRow:
     source_index: int
@@ -72,6 +76,61 @@ def _as_date(value: Any, epoch: Any = None) -> date | None:
 
 def _has_value(row: Sequence[Any]) -> bool:
     return any(value is not None and value != "" for value in row)
+
+
+def _komet_sheet(workbook):
+    try:
+        return workbook[KOMET_SHEET_NAME]
+    except KeyError as exc:
+        raise RuntimeError(
+            f"El XLS de SharePoint no contiene la pestaña requerida {KOMET_SHEET_NAME}."
+        ) from exc
+
+
+def normalize_date_formats(source_path: Path, destination: Path) -> int:
+    workbook = load_workbook(source_path, data_only=False)
+    date_columns: list[tuple[str, int, int]] = []
+    changed = 0
+    try:
+        worksheet = _komet_sheet(workbook)
+        date_column = None
+        header_row = None
+        for row in worksheet.iter_rows(min_row=1, max_row=min(10, worksheet.max_row)):
+            for cell in row:
+                if str(cell.value or "").strip().lower() == "available from":
+                    date_column = cell.column
+                    header_row = cell.row
+                    break
+            if date_column is not None:
+                break
+        if date_column is not None and header_row is not None:
+            date_columns.append((worksheet.title, header_row, date_column))
+            for row in range(header_row + 1, worksheet.max_row + 1):
+                cell = worksheet.cell(row=row, column=date_column)
+                if cell.value is not None:
+                    cell.number_format = DATE_NUMBER_FORMAT
+                    changed += 1
+        if changed == 0:
+            raise RuntimeError("No se encontraron fechas en la columna Available From del XLS de SharePoint.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        workbook.save(destination)
+    finally:
+        workbook.close()
+
+    verification = load_workbook(destination, read_only=True, data_only=False)
+    try:
+        formats = set()
+        for sheet_name, header_row, column in date_columns:
+            worksheet = verification[sheet_name]
+            for row in range(header_row + 1, worksheet.max_row + 1):
+                cell = worksheet.cell(row=row, column=column)
+                if cell.value is not None:
+                    formats.add(cell.number_format)
+    finally:
+        verification.close()
+    if formats != {DATE_NUMBER_FORMAT}:
+        raise RuntimeError(f"El XLS normalizado conserva formatos de fecha inesperados: {sorted(formats)}")
+    return changed
 
 
 def _same_value(left: Any, right: Any, *, date_value: bool = False) -> bool:
@@ -233,7 +292,7 @@ def _verify_saved_workbook(
 ) -> None:
     workbook = load_workbook(output_path, data_only=False)
     try:
-        sheet = workbook.active
+        sheet = _komet_sheet(workbook)
         actual_rows = [
             tuple(cell.value for cell in row)
             for row in sheet.iter_rows(
@@ -299,7 +358,7 @@ def transform_inventory_workbook(
 ) -> InventoryTransformResult:
     workbook = load_workbook(source_path, data_only=False, keep_links=True)
     try:
-        sheet = workbook.active
+        sheet = _komet_sheet(workbook)
         header_row, product_column, date_column = _header_columns(sheet)
         data_start = header_row + 1
         original_max_row = sheet.max_row
@@ -341,3 +400,24 @@ def transform_inventory_workbook(
         assumed_today=assumed_today,
     )
     return result
+
+
+def create_single_sheet_workbook(source_path: Path, output_path: Path) -> None:
+    """Save a copy containing only the Availability sheet for Kometsales."""
+    workbook = load_workbook(source_path, data_only=False, keep_links=True)
+    try:
+        target_sheet = _komet_sheet(workbook)
+        for worksheet in tuple(workbook.worksheets):
+            if worksheet is not target_sheet:
+                workbook.remove(worksheet)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        workbook.save(output_path)
+    finally:
+        workbook.close()
+
+    verification = load_workbook(output_path, data_only=False, read_only=True)
+    try:
+        if verification.sheetnames != [target_sheet.title]:
+            raise RuntimeError("La copia para Kometsales no conserva únicamente la pestaña Availability.")
+    finally:
+        verification.close()

@@ -100,7 +100,7 @@ const workflows = {
 const lastDispatch = new Map();
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
 const graphUrl = 'https://graph.microsoft.com/v1.0';
-const cajasSharePointUrl = process.env.CAJAS_SHAREPOINT_URL || 'https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BC0D676CF-1FBB-4922-88D2-FE4D6FD4526A%7D&file=Inventory%20Upload%20Boxes%20050926.xlsx&action=default&mobileredirect=true';
+const cajasSharePointUrl = process.env.CAJAS_SHAREPOINT_URL || 'https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B432E0F6F-229A-4635-A25A-A049DC537883%7D&file=Inventory%20Upload%20Boxes%2009092026.xlsx&action=default&mobileredirect=true';
 const maxInlineLogoBytes = 24 * 1024;
 const maxSharePointLogoBytes = 10 * 1024 * 1024;
 const inlineLogoTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
