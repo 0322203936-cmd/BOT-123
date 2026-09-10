@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import re
+import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,6 +18,7 @@ UPLOAD_CHUNK_SIZE = 12 * 320 * 1024
 SIMPLE_ATTACHMENT_LIMIT = 3 * 1024 * 1024
 MAX_ATTACHMENT_SIZE = 150 * 1024 * 1024
 MAX_INLINE_LOGO_SIZE = 24 * 1024
+MAX_SHAREPOINT_LOGO_SIZE = 10 * 1024 * 1024
 INLINE_LOGO_CONTENT_ID = "cajas-logo"
 
 
@@ -45,6 +47,33 @@ def _parse_inline_logo(value: object) -> tuple[str, bytes, str]:
     if not content or len(content) > MAX_INLINE_LOGO_SIZE:
         raise EmailConfigError("El logo debe pesar como máximo 24 KB.")
     return value.strip(), content, match.group(1).lower()
+
+
+def _clean_sharepoint_logo(value: object) -> dict | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise EmailConfigError("La referencia del logo en SharePoint no es válida.")
+    drive_id = value.get("driveId")
+    item_id = value.get("itemId")
+    name = value.get("name")
+    content_type = value.get("contentType")
+    if not all(isinstance(item, str) and item.strip() for item in (drive_id, item_id, name, content_type)):
+        raise EmailConfigError("La referencia del logo en SharePoint está incompleta.")
+    drive_id = drive_id.strip()
+    item_id = item_id.strip()
+    name = name.strip()
+    content_type = content_type.strip().lower()
+    if content_type not in {"image/png", "image/jpeg", "image/gif", "image/bmp"}:
+        raise EmailConfigError("El formato del logo no está permitido.")
+    if len(name) > 100 or any(character in name for character in ("/", "\\", "\r", "\n")):
+        raise EmailConfigError("El nombre del logo no es válido.")
+    return {
+        "driveId": drive_id,
+        "itemId": item_id,
+        "name": name,
+        "contentType": content_type,
+    }
 
 
 def _clean_recipients(value: object, field: str) -> list[str]:
@@ -85,6 +114,7 @@ def load_email_config(raw_config: str | None) -> dict | None:
     logo_url = value.get("logoUrl", "")
     logo_data, _logo_bytes, logo_content_type = _parse_inline_logo(value.get("logoData", ""))
     logo_name = value.get("logoName", "")
+    logo_sharepoint = _clean_sharepoint_logo(value.get("logoSharePoint"))
     if not isinstance(subject, str) or not subject.strip() or len(subject.strip()) > 200:
         raise EmailConfigError("El asunto es obligatorio y debe tener hasta 200 caracteres.")
     if not isinstance(body_html, str) or not body_html.strip() or len(body_html) > 100_000:
@@ -106,8 +136,13 @@ def load_email_config(raw_config: str | None) -> dict | None:
             "image/gif": "logo.gif",
             "image/bmp": "logo.bmp",
         }[logo_content_type]
-    if logo_data:
+    if logo_data and not logo_sharepoint:
         logo_url = ""
+    if logo_sharepoint:
+        logo_url = ""
+        logo_data = ""
+        logo_name = ""
+        logo_content_type = ""
 
     return {
         "recipients": recipients,
@@ -119,6 +154,7 @@ def load_email_config(raw_config: str | None) -> dict | None:
         "logoData": logo_data,
         "logoName": logo_name,
         "logoContentType": logo_content_type,
+        "logoSharePoint": logo_sharepoint,
     }
 
 
@@ -128,9 +164,10 @@ def _graph_recipients(addresses: list[str]) -> list[dict]:
 
 def build_graph_message(config: dict) -> dict:
     logo_data = config.get("logoData", "")
+    logo_sharepoint = config.get("logoSharePoint")
     logo_url = config.get("logoUrl", "")
     logo_html = ""
-    if logo_data:
+    if logo_data or logo_sharepoint:
         logo_html = (
             '<p style="margin:0 0 20px;text-align:left;">'
             f'<img src="cid:{INLINE_LOGO_CONTENT_ID}" alt="Logo" style="max-width:240px;height:auto;">'
@@ -180,6 +217,48 @@ def build_inline_logo_attachment(config: dict) -> dict | None:
     }
 
 
+def _download_sharepoint_logo(token: str, config: dict) -> Path | None:
+    logo = config.get("logoSharePoint")
+    if not logo:
+        return None
+    drive_id = quote(str(logo["driveId"]), safe="")
+    item_id = quote(str(logo["itemId"]), safe="")
+    response = requests.get(
+        f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/content",
+        headers=graph_headers(token),
+        timeout=120,
+        stream=True,
+    )
+    _raise_for_graph(response, "descargar el logo desde SharePoint")
+    suffix = Path(str(logo["name"])).suffix or ".img"
+    temporary = tempfile.NamedTemporaryFile(prefix="cajas-logo-", suffix=suffix, delete=False)
+    temporary_path = Path(temporary.name)
+    total = 0
+    try:
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_SHAREPOINT_LOGO_SIZE:
+                raise EmailConfigError("El logo de SharePoint debe pesar como máximo 10 MB.")
+            temporary.write(chunk)
+        if not total:
+            raise EmailConfigError("El logo de SharePoint está vacío.")
+    except Exception:
+        temporary.close()
+        close_response = getattr(response, "close", None)
+        if callable(close_response):
+            close_response()
+        temporary_path.unlink(missing_ok=True)
+        raise
+    else:
+        temporary.close()
+        close_response = getattr(response, "close", None)
+        if callable(close_response):
+            close_response()
+    return temporary_path
+
+
 def _user_path(sender: str, suffix: str) -> str:
     return f"{GRAPH_URL}/users/{quote(sender, safe='')}/{suffix}"
 
@@ -205,14 +284,25 @@ def _create_draft(token: str, sender: str, message: dict) -> str:
     return message_id
 
 
-def _upload_small_attachment(token: str, sender: str, message_id: str, attachment_path: Path) -> None:
-    content_type = mimetypes.guess_type(attachment_path.name)[0] or "application/octet-stream"
+def _upload_small_attachment(
+    token: str,
+    sender: str,
+    message_id: str,
+    attachment_path: Path,
+    *,
+    content_id: str | None = None,
+    content_type: str | None = None,
+) -> None:
+    content_type = content_type or mimetypes.guess_type(attachment_path.name)[0] or "application/octet-stream"
     payload = {
         "@odata.type": "#microsoft.graph.fileAttachment",
         "name": attachment_path.name,
         "contentType": content_type,
         "contentBytes": base64.b64encode(attachment_path.read_bytes()).decode("ascii"),
     }
+    if content_id:
+        payload["contentId"] = content_id
+        payload["isInline"] = True
     response = requests.post(
         _user_path(sender, f"messages/{quote(message_id, safe='')}/attachments"),
         headers={**graph_headers(token), "Content-Type": "application/json"},
@@ -235,18 +325,56 @@ def _upload_inline_logo(token: str, sender: str, message_id: str, config: dict) 
     _raise_for_graph(response, "adjuntar el logo")
 
 
-def _upload_large_attachment(token: str, sender: str, message_id: str, attachment_path: Path) -> None:
+def _upload_inline_logo_file(
+    token: str,
+    sender: str,
+    message_id: str,
+    logo_path: Path,
+    content_type: str,
+) -> None:
+    if logo_path.stat().st_size < SIMPLE_ATTACHMENT_LIMIT:
+        _upload_small_attachment(
+            token,
+            sender,
+            message_id,
+            logo_path,
+            content_id=INLINE_LOGO_CONTENT_ID,
+            content_type=content_type,
+        )
+    else:
+        _upload_large_attachment(
+            token,
+            sender,
+            message_id,
+            logo_path,
+            content_id=INLINE_LOGO_CONTENT_ID,
+            content_type=content_type,
+        )
+
+
+def _upload_large_attachment(
+    token: str,
+    sender: str,
+    message_id: str,
+    attachment_path: Path,
+    *,
+    content_id: str | None = None,
+    content_type: str | None = None,
+) -> None:
     size = attachment_path.stat().st_size
+    attachment_item = {
+        "attachmentType": "file",
+        "name": attachment_path.name,
+        "size": size,
+    }
+    if content_id:
+        attachment_item["contentId"] = content_id
+        attachment_item["isInline"] = True
+        attachment_item["contentType"] = content_type or mimetypes.guess_type(attachment_path.name)[0] or "application/octet-stream"
     response = requests.post(
         _user_path(sender, f"messages/{quote(message_id, safe='')}/attachments/createUploadSession"),
         headers={**graph_headers(token), "Content-Type": "application/json"},
-        json={
-            "AttachmentItem": {
-                "attachmentType": "file",
-                "name": attachment_path.name,
-                "size": size,
-            }
-        },
+        json={"AttachmentItem": attachment_item},
         timeout=30,
     )
     _raise_for_graph(response, "crear la sesión para el XLS grande")
@@ -292,35 +420,49 @@ def send_report_email(
 
     graph_access_token = token or graph_token()
     clean_sender = sender.strip()
-    message_id = _create_draft(graph_access_token, clean_sender, build_graph_message(config))
+    sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
     try:
-        _upload_inline_logo(graph_access_token, clean_sender, message_id, config)
-        if attachment_size < SIMPLE_ATTACHMENT_LIMIT:
-            _upload_small_attachment(graph_access_token, clean_sender, message_id, attachment_path)
-        else:
-            _upload_large_attachment(graph_access_token, clean_sender, message_id, attachment_path)
-    except Exception:
-        # El borrador no debe quedar guardado si falla la carga del adjunto.
+        message_id = _create_draft(graph_access_token, clean_sender, build_graph_message(config))
         try:
-            requests.delete(
-                _user_path(clean_sender, f"messages/{quote(message_id, safe='')}"),
+            if sharepoint_logo_path:
+                _upload_inline_logo_file(
+                    graph_access_token,
+                    clean_sender,
+                    message_id,
+                    sharepoint_logo_path,
+                    config["logoSharePoint"]["contentType"],
+                )
+            else:
+                _upload_inline_logo(graph_access_token, clean_sender, message_id, config)
+            if attachment_size < SIMPLE_ATTACHMENT_LIMIT:
+                _upload_small_attachment(graph_access_token, clean_sender, message_id, attachment_path)
+            else:
+                _upload_large_attachment(graph_access_token, clean_sender, message_id, attachment_path)
+        except Exception:
+            # El borrador no debe quedar guardado si falla la carga del adjunto.
+            try:
+                requests.delete(
+                    _user_path(clean_sender, f"messages/{quote(message_id, safe='')}"),
+                    headers=graph_headers(graph_access_token),
+                    timeout=30,
+                )
+            except Exception:
+                pass
+            raise
+
+        try:
+            response = requests.post(
+                _user_path(clean_sender, f"messages/{quote(message_id, safe='')}/send"),
                 headers=graph_headers(graph_access_token),
                 timeout=30,
             )
-        except Exception:
-            pass
-        raise
-
-    try:
-        response = requests.post(
-            _user_path(clean_sender, f"messages/{quote(message_id, safe='')}/send"),
-            headers=graph_headers(graph_access_token),
-            timeout=30,
-        )
-        _raise_for_graph(response, "enviar el correo")
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            "Graph no confirmó el envío. El borrador se conserva para revisión; "
-            "verifica Borradores y Elementos enviados antes de reejecutar."
-        ) from exc
-    print(f"Correo enviado con {attachment_path.name} a {len(config['recipients'])} destinatario(s).", flush=True)
+            _raise_for_graph(response, "enviar el correo")
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                "Graph no confirmó el envío. El borrador se conserva para revisión; "
+                "verifica Borradores y Elementos enviados antes de reejecutar."
+            ) from exc
+        print(f"Correo enviado con {attachment_path.name} a {len(config['recipients'])} destinatario(s).", flush=True)
+    finally:
+        if sharepoint_logo_path:
+            sharepoint_logo_path.unlink(missing_ok=True)

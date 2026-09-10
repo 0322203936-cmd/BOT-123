@@ -99,8 +99,17 @@ const workflows = {
 
 const lastDispatch = new Map();
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
+const graphUrl = 'https://graph.microsoft.com/v1.0';
+const cajasSharePointUrl = process.env.CAJAS_SHAREPOINT_URL || 'https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BC0D676CF-1FBB-4922-88D2-FE4D6FD4526A%7D&file=Inventory%20Upload%20Boxes%20050926.xlsx&action=default&mobileredirect=true';
 const maxInlineLogoBytes = 24 * 1024;
+const maxSharePointLogoBytes = 10 * 1024 * 1024;
 const inlineLogoTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
+const logoExtensions = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+};
 const defaultCajasEmailConfig = {
   recipients: [],
   cc: [],
@@ -111,6 +120,7 @@ const defaultCajasEmailConfig = {
   logoData: '',
   logoName: '',
   logoContentType: '',
+  logoSharePoint: null,
 };
 
 const reportMatchers = {
@@ -168,6 +178,10 @@ const artifactNameMatchers = {
 
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
+app.use(
+  '/api/workflows/cajas/email-logo',
+  express.raw({ type: [...inlineLogoTypes], limit: `${maxSharePointLogoBytes}b` }),
+);
 app.use('/api/workflows/cajas/email-config', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '10kb' }));
 
@@ -183,6 +197,13 @@ function authenticate(req, res, next) {
     return res.status(401).json({ message: 'La contraseña no es correcta.' });
   }
   next();
+}
+
+function requireWriteAuthentication(req, res, next) {
+  if (!appPassword) {
+    return res.status(503).json({ message: 'Falta configurar APP_PASSWORD en Render para guardar esta configuración.' });
+  }
+  return authenticate(req, res, next);
 }
 
 async function githubRequest(endpoint, options = {}) {
@@ -306,6 +327,131 @@ function extractZipEntry(archive, entry) {
   return data;
 }
 
+function sharePointId(value) {
+  return `u!${Buffer.from(value, 'utf8').toString('base64url')}`;
+}
+
+function sharePointError(response, action) {
+  return response.text().then((detail) => {
+    const error = new Error(`SharePoint no pudo ${action} (HTTP ${response.status}). ${detail.slice(0, 500)}`);
+    error.status = response.status >= 400 && response.status < 500 ? 502 : 503;
+    throw error;
+  });
+}
+
+function requiredSharePointEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    const error = new Error(`Falta configurar ${name} en Render para cargar el logo de Cajas.`);
+    error.status = 503;
+    throw error;
+  }
+  return value;
+}
+
+async function sharePointToken() {
+  const tenantId = requiredSharePointEnv('SHAREPOINT_TENANT_ID');
+  const response = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: requiredSharePointEnv('SHAREPOINT_CLIENT_ID'),
+        client_secret: requiredSharePointEnv('SHAREPOINT_CLIENT_SECRET'),
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+      }),
+    },
+  );
+  if (!response.ok) return sharePointError(response, 'autenticar la carga del logo');
+  const payload = await response.json();
+  if (!payload.access_token) {
+    const error = new Error('SharePoint no devolvió un token para cargar el logo de Cajas.');
+    error.status = 503;
+    throw error;
+  }
+  return payload.access_token;
+}
+
+async function uploadCajasLogo(buffer, contentType) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) {
+    const error = new Error('Selecciona un archivo de logo válido.');
+    error.status = 400;
+    throw error;
+  }
+  if (buffer.length > maxSharePointLogoBytes) {
+    const error = new Error('El logo debe pesar como máximo 10 MB.');
+    error.status = 400;
+    throw error;
+  }
+  if (!inlineLogoTypes.has(contentType)) {
+    const error = new Error('El logo debe ser PNG, JPG, GIF o BMP.');
+    error.status = 415;
+    throw error;
+  }
+
+  const token = await sharePointToken();
+  const itemResponse = await fetch(`${graphUrl}/shares/${sharePointId(cajasSharePointUrl)}/driveItem`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!itemResponse.ok) return sharePointError(itemResponse, 'localizar el archivo de Cajas');
+  const item = await itemResponse.json();
+  const driveId = item.parentReference?.driveId;
+  const parentId = item.parentReference?.id;
+  if (!driveId || !parentId) {
+    const error = new Error('SharePoint no devolvió la carpeta del archivo de Cajas.');
+    error.status = 502;
+    throw error;
+  }
+
+  const filename = `cajas-email-logo-${crypto.randomUUID()}${logoExtensions[contentType]}`;
+  const uploadResponse = await fetch(
+    `${graphUrl}/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentId)}:/${encodeURIComponent(filename)}:/content`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': contentType,
+        'Content-Length': String(buffer.length),
+      },
+      body: buffer,
+    },
+  );
+  if (!uploadResponse.ok) return sharePointError(uploadResponse, 'guardar el logo');
+  const uploaded = await uploadResponse.json();
+  if (!uploaded.id) {
+    const error = new Error('SharePoint guardó el logo sin devolver su identificador.');
+    error.status = 502;
+    throw error;
+  }
+  return {
+    driveId,
+    itemId: uploaded.id,
+    name: filename,
+    contentType,
+  };
+}
+
+async function deleteCajasLogo(value) {
+  const logo = normalizeCajasLogoSharePoint(value);
+  if (!logo || !/^cajas-email-logo-[0-9a-f-]{36}\.(png|jpg|gif|bmp)$/i.test(logo.name)) {
+    const error = new Error('La referencia del logo temporal no es válida.');
+    error.status = 400;
+    throw error;
+  }
+
+  const token = await sharePointToken();
+  const response = await fetch(
+    `${graphUrl}/drives/${encodeURIComponent(logo.driveId)}/items/${encodeURIComponent(logo.itemId)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!response.ok && response.status !== 404) return sharePointError(response, 'eliminar el logo temporal');
+}
+
 function emailList(value, field) {
   if (!Array.isArray(value)) {
     const error = new Error(`El campo ${field} debe ser una lista de correos.`);
@@ -337,6 +483,30 @@ function emailList(value, field) {
   return result;
 }
 
+function normalizeCajasLogoSharePoint(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    const error = new Error('La referencia del logo en SharePoint no es válida.');
+    error.status = 400;
+    throw error;
+  }
+  const driveId = typeof value.driveId === 'string' ? value.driveId.trim() : '';
+  const itemId = typeof value.itemId === 'string' ? value.itemId.trim() : '';
+  const name = typeof value.name === 'string' ? value.name.trim() : '';
+  const contentType = typeof value.contentType === 'string' ? value.contentType.trim().toLowerCase() : '';
+  if (!driveId || !itemId || !name || !inlineLogoTypes.has(contentType)) {
+    const error = new Error('La referencia del logo en SharePoint está incompleta.');
+    error.status = 400;
+    throw error;
+  }
+  if (name.length > 100 || /[\\/\r\n]/.test(name)) {
+    const error = new Error('El nombre del logo no es válido.');
+    error.status = 400;
+    throw error;
+  }
+  return { driveId, itemId, name, contentType };
+}
+
 function normalizeCajasEmailConfig(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     const error = new Error('La configuración del correo debe ser un objeto.');
@@ -356,6 +526,7 @@ function normalizeCajasEmailConfig(value) {
   const logoUrl = typeof value.logoUrl === 'string' ? value.logoUrl.trim() : '';
   const logoData = typeof value.logoData === 'string' ? value.logoData.trim() : '';
   let logoName = typeof value.logoName === 'string' ? value.logoName.trim() : '';
+  const logoSharePoint = normalizeCajasLogoSharePoint(value.logoSharePoint);
   if (!subject || subject.length > 200) {
     const error = new Error('El asunto es obligatorio y debe tener hasta 200 caracteres.');
     error.status = 400;
@@ -377,7 +548,7 @@ function normalizeCajasEmailConfig(value) {
     throw error;
   }
   let logoContentType = '';
-  if (logoData) {
+  if (logoData && !logoSharePoint) {
     const match = logoData.match(/^data:(image\/(?:png|jpeg|gif|bmp));base64,([A-Za-z0-9+/]*={0,2})$/i);
     if (!match || match[2].length % 4 !== 0) {
       const error = new Error('El logo debe ser una imagen PNG, JPG, GIF o BMP.');
@@ -418,10 +589,11 @@ function normalizeCajasEmailConfig(value) {
     bcc,
     subject,
     bodyHtml,
-    logoUrl: logoData ? '' : logoUrl,
-    logoData,
-    logoName,
-    logoContentType,
+    logoUrl: logoData || logoSharePoint ? '' : logoUrl,
+    logoData: logoSharePoint ? '' : logoData,
+    logoName: logoSharePoint ? '' : logoName,
+    logoContentType: logoSharePoint ? '' : logoContentType,
+    logoSharePoint,
   };
   if (Buffer.byteLength(JSON.stringify(config), 'utf8') > 40_000) {
     const error = new Error('La configuración del correo es demasiado grande para GitHub Actions.');
@@ -552,7 +724,29 @@ app.get('/api/workflows/cajas/email-config', authenticate, async (_req, res, nex
   }
 });
 
-app.put('/api/workflows/cajas/email-config', authenticate, async (req, res, next) => {
+app.post('/api/workflows/cajas/email-logo', requireWriteAuthentication, async (req, res, next) => {
+  try {
+    const contentType = (req.get('Content-Type') || '').split(';', 1)[0].trim().toLowerCase();
+    if (!inlineLogoTypes.has(contentType)) {
+      return res.status(415).json({ message: 'El logo debe ser PNG, JPG, GIF o BMP.' });
+    }
+    const logoSharePoint = await uploadCajasLogo(req.body, contentType);
+    return res.json({ logoSharePoint });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete('/api/workflows/cajas/email-logo', requireWriteAuthentication, async (req, res, next) => {
+  try {
+    await deleteCajasLogo(req.body);
+    return res.status(204).send();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put('/api/workflows/cajas/email-config', requireWriteAuthentication, async (req, res, next) => {
   try {
     const config = normalizeCajasEmailConfig(req.body);
     const variablePath = `/repos/${encodeURIComponent(workflows.cajas.owner)}/${encodeURIComponent(workflows.cajas.repo)}/actions/variables`;
