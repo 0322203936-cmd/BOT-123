@@ -282,6 +282,57 @@ def _copy_row_format(sheet, source_row: int, target_row: int, max_column: int) -
             target.comment = copy(source.comment)
 
 
+def _capture_row_formats(sheet, max_row: int, max_column: int) -> dict[int, dict[str, Any]]:
+    formats: dict[int, dict[str, Any]] = {}
+    for row in range(1, max_row + 1):
+        dimension = sheet.row_dimensions[row]
+        cells = []
+        for column in range(1, max_column + 1):
+            cell = sheet.cell(row, column)
+            cells.append(
+                (
+                    copy(cell._style) if cell.has_style else None,
+                    cell.number_format,
+                    copy(cell.comment) if cell.comment is not None else None,
+                )
+            )
+        formats[row] = {
+            "height": dimension.height,
+            "hidden": dimension.hidden,
+            "outlineLevel": dimension.outlineLevel,
+            "collapsed": dimension.collapsed,
+            "cells": tuple(cells),
+        }
+    return formats
+
+
+def _copy_captured_row_format(
+    sheet,
+    captured_formats: dict[int, dict[str, Any]],
+    source_row: int,
+    target_row: int,
+    max_column: int,
+) -> None:
+    source_format = captured_formats[source_row]
+    if source_row != target_row:
+        target_dimension = sheet.row_dimensions[target_row]
+        target_dimension.height = source_format["height"]
+        target_dimension.hidden = source_format["hidden"]
+        target_dimension.outlineLevel = source_format["outlineLevel"]
+        target_dimension.collapsed = source_format["collapsed"]
+    for column, (style, number_format, comment) in enumerate(
+        source_format["cells"],
+        start=1,
+    ):
+        target = sheet.cell(target_row, column)
+        if style is not None:
+            target._style = copy(style)
+        if number_format:
+            target.number_format = number_format
+        if comment is not None:
+            target.comment = copy(comment)
+
+
 def _verify_saved_workbook(
     output_path: Path,
     expected: InventoryTransformResult,
@@ -334,13 +385,25 @@ def _verify_saved_workbook(
         ):
             raise RuntimeError("El XLS procesado todavía contiene fechas dentro de la ventana eliminada.")
 
+        source_target_rows = {
+            expected_row.source_index: row_index
+            for row_index, expected_row in enumerate(
+                expected.output_rows,
+                start=header_row + 1,
+            )
+            if not expected_row.is_added and not expected_row.is_blank
+        }
         for row_index, expected_row in enumerate(
             expected.output_rows,
             start=header_row + 1,
         ):
             if not expected_row.is_added:
                 continue
-            source_row = header_row + 1 + expected_row.source_index
+            source_row = source_target_rows.get(expected_row.source_index)
+            if source_row is None:
+                raise RuntimeError(
+                    f"No se encontró la fila base retenida para la fila nueva {row_index}."
+                )
             for column in range(1, sheet.max_column + 1):
                 if sheet.cell(row_index, column)._style != sheet.cell(source_row, column)._style:
                     raise RuntimeError(
@@ -363,6 +426,7 @@ def transform_inventory_workbook(
         data_start = header_row + 1
         original_max_row = sheet.max_row
         max_column = sheet.max_column
+        captured_formats = _capture_row_formats(sheet, original_max_row, max_column)
         rows = [
             tuple(cell.value for cell in sheet.iter_rows(min_row=row, max_row=row, max_col=max_column).__next__())
             for row in range(data_start, original_max_row + 1)
@@ -378,7 +442,13 @@ def transform_inventory_workbook(
         for target_offset, output_row in enumerate(result.output_rows):
             target_row = data_start + target_offset
             source_row = data_start + output_row.source_index
-            _copy_row_format(sheet, source_row, target_row, max_column)
+            _copy_captured_row_format(
+                sheet,
+                captured_formats,
+                source_row,
+                target_row,
+                max_column,
+            )
             for column, value in enumerate(output_row.values, start=1):
                 sheet.cell(target_row, column).value = value
 
