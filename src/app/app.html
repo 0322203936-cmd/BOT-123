@@ -161,13 +161,26 @@
                   <input name="emailSubject" type="text" [(ngModel)]="emailSubject" maxlength="200" required />
                 </label>
               </div>
-              <label>
-                Logo por URL
-                <input name="emailLogoUrl" type="url" [(ngModel)]="emailLogoUrl" placeholder="https://.../logo.png" />
-              </label>
-              @if (emailLogoUrl) {
-                <img class="logo-preview" [src]="emailLogoUrl" alt="Vista previa del logo" />
-              }
+              <div class="logo-upload">
+                <label for="emailLogoFile">Logo del correo</label>
+                <input
+                  id="emailLogoFile"
+                  name="emailLogoFile"
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/bmp"
+                  (change)="onLogoSelected($event)"
+                />
+                <p class="field-help">Selecciona PNG, JPG, GIF o BMP de máximo 24 KB.</p>
+                @if (emailLogoName) {
+                  <div class="logo-file-row">
+                    <span>{{ emailLogoName }}</span>
+                    <button class="remove-logo-button" type="button" (click)="clearLogo()">Quitar logo</button>
+                  </div>
+                }
+                @if (emailLogoPreview) {
+                  <img class="logo-preview" [src]="emailLogoPreview" alt="Vista previa del logo" />
+                }
+              </div>
               <label class="editor-label">
                 Mensaje
                 <editor
