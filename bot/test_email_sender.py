@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from email_sender import (
     EmailConfigError,
-    UPLOAD_CHUNK_SIZE,
     build_graph_message,
     load_email_config,
     send_report_email,
@@ -137,7 +136,7 @@ class EmailSenderTests(unittest.TestCase):
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.post", create=True)
-    def test_uploads_logo_as_inline_attachment(self, post, put, delete):
+    def test_sends_logo_and_report_directly_without_creating_a_draft(self, post, put, delete):
         class Response:
             ok = True
             status_code = 200
@@ -170,7 +169,11 @@ class EmailSenderTests(unittest.TestCase):
                 token="token",
             )
 
-        inline_payload = post.call_args_list[1].kwargs["json"]
+        self.assertEqual(post.call_count, 1)
+        self.assertTrue(post.call_args.args[0].endswith("/sendMail"))
+        attachments = post.call_args.kwargs["json"]["message"]["attachments"]
+        self.assertEqual(len(attachments), 2)
+        inline_payload = attachments[0]
         self.assertTrue(inline_payload["isInline"])
         self.assertEqual(inline_payload["contentId"], "cajas-logo")
         self.assertEqual(inline_payload["contentBytes"], "bG9nbw==")
@@ -181,7 +184,7 @@ class EmailSenderTests(unittest.TestCase):
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.get", create=True)
     @patch("email_sender.requests.post", create=True)
-    def test_downloads_sharepoint_logo_and_uploads_it_inline(self, post, get, put, delete):
+    def test_sends_downloaded_sharepoint_logo_inline_in_direct_message(self, post, get, put, delete):
         class Response:
             ok = True
             status_code = 200
@@ -226,7 +229,11 @@ class EmailSenderTests(unittest.TestCase):
             )
 
         self.assertEqual(get.call_count, 1)
-        inline_payload = post.call_args_list[1].kwargs["json"]
+        self.assertEqual(post.call_count, 1)
+        self.assertTrue(post.call_args.args[0].endswith("/sendMail"))
+        attachments = post.call_args.kwargs["json"]["message"]["attachments"]
+        self.assertEqual(len(attachments), 2)
+        inline_payload = attachments[0]
         self.assertTrue(inline_payload["isInline"])
         self.assertEqual(inline_payload["contentId"], "cajas-logo")
         self.assertEqual(inline_payload["contentBytes"], "bG9nbw==")
@@ -283,7 +290,7 @@ class EmailSenderTests(unittest.TestCase):
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.get", create=True)
     @patch("email_sender.requests.post", create=True)
-    def test_uploads_large_sharepoint_logo_as_inline_upload_session(self, post, get, put, delete):
+    def test_rejects_sharepoint_logo_too_large_for_direct_send(self, post, get, put, delete):
         class Response:
             ok = True
             status_code = 200
@@ -301,51 +308,41 @@ class EmailSenderTests(unittest.TestCase):
             def close(self):
                 pass
 
-        post.side_effect = [
-            Response({"id": "draft-1"}),
-            Response({"uploadUrl": "https://upload.example/logo-session"}),
-            Response(),
-            Response(),
-        ]
+        post.return_value = Response()
         get.return_value = Response()
         put.return_value = Response()
 
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "inventory.xlsx"
             report.write_bytes(b"report")
-            send_report_email(
-                {
-                    "recipients": ["destino@example.com"],
-                    "cc": [],
-                    "bcc": [],
-                    "subject": "Reporte",
-                    "bodyHtml": "<p>Listo</p>",
-                    "logoSharePoint": {
-                        "driveId": "drive-1",
-                        "itemId": "item-1",
-                        "name": "cajas-email-logo.png",
-                        "contentType": "image/png",
+            with self.assertRaises(EmailConfigError):
+                send_report_email(
+                    {
+                        "recipients": ["destino@example.com"],
+                        "cc": [],
+                        "bcc": [],
+                        "subject": "Reporte",
+                        "bodyHtml": "<p>Listo</p>",
+                        "logoSharePoint": {
+                            "driveId": "drive-1",
+                            "itemId": "item-1",
+                            "name": "cajas-email-logo.png",
+                            "contentType": "image/png",
+                        },
                     },
-                },
-                "remitente@example.com",
-                report,
-                token="token",
-            )
+                    "remitente@example.com",
+                    report,
+                    token="token",
+                )
 
-        inline_session = post.call_args_list[1].kwargs["json"]["AttachmentItem"]
-        self.assertTrue(inline_session["isInline"])
-        self.assertEqual(inline_session["contentId"], "cajas-logo")
-        self.assertEqual(inline_session["contentType"], "image/png")
-        self.assertEqual(put.call_count, 1)
+        self.assertFalse(post.called)
+        self.assertFalse(put.called)
         self.assertFalse(delete.called)
 
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.post", create=True)
-    def test_uploads_large_report_in_graph_blocks(self, post, put, delete):
-        self.assertLess(UPLOAD_CHUNK_SIZE, 4 * 1024 * 1024)
-        self.assertEqual(UPLOAD_CHUNK_SIZE % (320 * 1024), 0)
-
+    def test_rejects_report_too_large_for_direct_send(self, post, put, delete):
         class Response:
             ok = True
             status_code = 200
@@ -357,33 +354,29 @@ class EmailSenderTests(unittest.TestCase):
             def json(self):
                 return self.payload
 
-        post.side_effect = [
-            Response({"id": "draft-1"}),
-            Response({"uploadUrl": "https://upload.example/session"}),
-            Response(),
-        ]
+        post.return_value = Response()
         put.return_value = Response()
 
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "inventory.xlsx"
-            report.write_bytes(b"x" * (UPLOAD_CHUNK_SIZE + 1))
-            send_report_email(
-                {
-                    "recipients": ["destino@example.com"],
-                    "cc": [],
-                    "bcc": [],
-                    "subject": "Reporte",
-                    "bodyHtml": "<p>Listo</p>",
-                    "logoUrl": "",
-                },
-                "remitente@example.com",
-                report,
-                token="token",
-            )
+            report.write_bytes(b"x" * (3 * 1024 * 1024))
+            with self.assertRaises(EmailConfigError):
+                send_report_email(
+                    {
+                        "recipients": ["destino@example.com"],
+                        "cc": [],
+                        "bcc": [],
+                        "subject": "Reporte",
+                        "bodyHtml": "<p>Listo</p>",
+                        "logoUrl": "",
+                    },
+                    "remitente@example.com",
+                    report,
+                    token="token",
+                )
 
-        self.assertEqual(put.call_count, 2)
-        self.assertEqual(put.call_args_list[0].kwargs["headers"]["Content-Range"], f"bytes 0-{UPLOAD_CHUNK_SIZE - 1}/{UPLOAD_CHUNK_SIZE + 1}")
-        self.assertEqual(put.call_args_list[1].kwargs["headers"]["Content-Range"], f"bytes {UPLOAD_CHUNK_SIZE}-{UPLOAD_CHUNK_SIZE}/{UPLOAD_CHUNK_SIZE + 1}")
+        self.assertFalse(post.called)
+        self.assertFalse(put.called)
         self.assertFalse(delete.called)
 
 
