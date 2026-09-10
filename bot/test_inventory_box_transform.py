@@ -9,16 +9,19 @@ from openpyxl.styles import Font, PatternFill
 try:
     from inventory_box_transform import (
         apply_inventory_rules,
+        create_single_sheet_workbook,
         transform_inventory_workbook,
     )
 except ImportError:
     try:
         from bot.inventory_box_transform import (
             apply_inventory_rules,
+            create_single_sheet_workbook,
             transform_inventory_workbook,
         )
     except ImportError:
         apply_inventory_rules = None
+        create_single_sheet_workbook = None
         transform_inventory_workbook = None
 
 
@@ -114,6 +117,57 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(sheet["D3"].value.date(), date(2026, 9, 15))
                 self.assertEqual(sheet["B3"]._style, sheet["B2"]._style)
                 self.assertEqual(sheet["D3"].number_format, sheet["D2"].number_format)
+            finally:
+                result.close()
+
+    def test_creates_a_komet_copy_with_only_the_availability_sheet(self) -> None:
+        self.assertIsNotNone(create_single_sheet_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "komet.xlsx"
+            workbook = Workbook()
+            active = workbook.active
+            active.title = "Customer View"
+            active["A1"] = "No debe ir a Komet"
+            availability = workbook.create_sheet("Availability")
+            availability.append(["Product Description", "Available From"])
+            availability.append(["A", date(2026, 9, 14)])
+            availability["A2"].font = Font(name="Arial", bold=True)
+            workbook.save(source)
+            workbook.close()
+
+            create_single_sheet_workbook(source, output)
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result.sheetnames, ["Availability"])
+                self.assertEqual(result.active["A2"].value, "A")
+                self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
+            finally:
+                result.close()
+
+    def test_keeps_the_second_sheet_in_the_full_transformed_workbook(self) -> None:
+        self.assertIsNotNone(transform_inventory_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "output.xlsx"
+            workbook = Workbook()
+            active = workbook.active
+            active.title = "Customer View"
+            active["A1"] = "Debe conservarse"
+            availability = workbook.create_sheet("Availability")
+            availability.append(["Product Description", "Available From"])
+            availability.append(["A", date(2026, 9, 14)])
+            workbook.save(source)
+            workbook.close()
+
+            transform_inventory_workbook(source, output, assumed_today=self.assumed_today)
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result.sheetnames, ["Customer View", "Availability"])
+                self.assertEqual(result["Customer View"]["A1"].value, "Debe conservarse")
+                self.assertEqual(result["Availability"]["A3"].value, "A")
             finally:
                 result.close()
 

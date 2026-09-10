@@ -42,6 +42,7 @@ jobs:
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
           MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
           CAJAS_EMAIL_CONFIG: ${{ vars.CAJAS_EMAIL_CONFIG }}
+          SHAREPOINT_BOXES_URL: ${{ vars.SHAREPOINT_BOXES_URL }}
         run: python -u bot/inventory_boxes.py
 
       - name: Guardar capturas

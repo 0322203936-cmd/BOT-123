@@ -6,7 +6,6 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from openpyxl import load_workbook
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from sharepoint_sync import (
@@ -16,23 +15,27 @@ from sharepoint_sync import (
     upload_sharepoint_file,
 )
 from email_sender import load_email_config, send_report_email
-from inventory_box_transform import transform_inventory_workbook
+from inventory_box_transform import (
+    create_single_sheet_workbook,
+    normalize_date_formats,
+    transform_inventory_workbook,
+)
 
 
 KOMET_LOGIN_URL = "https://app.kometsales.com/sign-in/login.do#st"
 KOMET_BOXES_URL = "https://app.kometsales.com/inventory-pricing/list_pricing.do#st"
-SHAREPOINT_BOXES_URL = (
+DEFAULT_SHAREPOINT_BOXES_URL = (
     "https://pacificafarms.sharepoint.com/:x:/r/sites/"
     "requerimientovsproyeccion/_layouts/15/Doc.aspx?"
-    "sourcedoc=%7BC0D676CF-1FBB-4922-88D2-FE4D6FD4526A%7D&"
-    "file=Inventory%20Upload%20Boxes%20050926.xlsx&action=default&mobileredirect=true"
+    "sourcedoc=%7B432E0F6F-229A-4635-A25A-A049DC537883%7D&"
+    "file=Inventory%20Upload%20Boxes%2009092026.xlsx&action=default&mobileredirect=true"
 )
+SHAREPOINT_BOXES_URL = os.environ.get("SHAREPOINT_BOXES_URL", "").strip() or DEFAULT_SHAREPOINT_BOXES_URL
 
 ARTIFACTS_DIR = Path("artifacts/inventory_boxes")
 CAPTURES_DIR = ARTIFACTS_DIR / "capturas"
 REPORTS_DIR = ARTIFACTS_DIR / "reportes"
 SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
-DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
 DELETE_BATCH_SETTLE_MS = 7_000
@@ -395,52 +398,6 @@ def download_and_prepare_source() -> tuple[str, dict, Path]:
     return token, item, destination
 
 
-def normalize_date_formats(source_path: Path, destination: Path) -> int:
-    workbook = load_workbook(source_path, data_only=False)
-    date_columns: list[tuple[str, int, int]] = []
-    changed = 0
-    try:
-        for worksheet in workbook.worksheets:
-            date_column = None
-            header_row = None
-            for row in worksheet.iter_rows(min_row=1, max_row=min(10, worksheet.max_row)):
-                for cell in row:
-                    if str(cell.value or "").strip().lower() == "available from":
-                        date_column = cell.column
-                        header_row = cell.row
-                        break
-                if date_column is not None:
-                    break
-            if date_column is None or header_row is None:
-                continue
-            date_columns.append((worksheet.title, header_row, date_column))
-            for row in range(header_row + 1, worksheet.max_row + 1):
-                cell = worksheet.cell(row=row, column=date_column)
-                if cell.value is not None:
-                    cell.number_format = DATE_NUMBER_FORMAT
-                    changed += 1
-        if changed == 0:
-            raise RuntimeError("No se encontraron fechas en la columna Available From del XLS de SharePoint.")
-        workbook.save(destination)
-    finally:
-        workbook.close()
-
-    verification = load_workbook(destination, read_only=True, data_only=False)
-    try:
-        formats = set()
-        for sheet_name, header_row, column in date_columns:
-            worksheet = verification[sheet_name]
-            for row in range(header_row + 1, worksheet.max_row + 1):
-                cell = worksheet.cell(row=row, column=column)
-                if cell.value is not None:
-                    formats.add(cell.number_format)
-    finally:
-        verification.close()
-    if formats != {DATE_NUMBER_FORMAT}:
-        raise RuntimeError(f"El XLS normalizado conserva formatos de fecha inesperados: {sorted(formats)}")
-    return changed
-
-
 def run() -> None:
     komet_user = required_secret("KOMET_USER")
     komet_password = required_secret("KOMET_PASSWORD")
@@ -450,27 +407,33 @@ def run() -> None:
     upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
     print(
         "Información del Excel actualizada en el mismo archivo de SharePoint; "
-        "se usará esa versión para Kometsales.",
+        "se conservará completo para SharePoint y correo, y se usará una copia "
+        "de la pestaña activa para Kometsales.",
         flush=True,
     )
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
-        page = context.new_page()
-        try:
-            login_kometsales(page, komet_user, komet_password)
-            capture(page, "00_sesion_iniciada.png")
-            open_boxes(page)
-            delete_all_inventory(page)
-            upload_boxes(page, source_path)
-            print(f"Proceso completo. URL final: {page.url}", flush=True)
-        except Exception:
-            capture(page, "99_error.png")
-            raise
-        finally:
-            context.close()
-            browser.close()
+    komet_upload_path = ARTIFACTS_DIR / "komet-upload.xlsx"
+    try:
+        create_single_sheet_workbook(source_path, komet_upload_path)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
+            page = context.new_page()
+            try:
+                login_kometsales(page, komet_user, komet_password)
+                capture(page, "00_sesion_iniciada.png")
+                open_boxes(page)
+                delete_all_inventory(page)
+                upload_boxes(page, komet_upload_path)
+                print(f"Proceso completo. URL final: {page.url}", flush=True)
+            except Exception:
+                capture(page, "99_error.png")
+                raise
+            finally:
+                context.close()
+                browser.close()
+    finally:
+        komet_upload_path.unlink(missing_ok=True)
 
     if not email_config:
         print(
