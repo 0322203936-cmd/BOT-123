@@ -171,6 +171,33 @@ class InventoryBoxTransformTests(unittest.TestCase):
             finally:
                 result.close()
 
+    def test_verifies_added_rows_against_their_retained_source_rows(self) -> None:
+        self.assertIsNotNone(transform_inventory_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "output.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Availability"
+            sheet.append(["Product Description", "Available From"])
+            sheet.append(["A", date(2026, 9, 14)])
+            sheet.append(["B", date(2026, 9, 10)])
+            sheet.append(["B", date(2026, 9, 15)])
+            sheet["A2"].fill = PatternFill(fill_type="solid", fgColor="FF0000")
+            sheet["A4"].fill = PatternFill(fill_type="solid", fgColor="00FF00")
+            workbook.save(source)
+            workbook.close()
+
+            transform_inventory_workbook(source, output, assumed_today=self.assumed_today)
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result.active["A4"].value, "A")
+                self.assertEqual(result.active["A5"].value, "B")
+                self.assertEqual(result.active["A5"]._style, result.active["A3"]._style)
+            finally:
+                result.close()
+
 
 if __name__ == "__main__":
     unittest.main()
