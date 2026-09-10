@@ -4,6 +4,7 @@ import os
 import re
 from datetime import date, datetime
 from pathlib import Path
+from time import monotonic
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
@@ -38,7 +39,8 @@ REPORTS_DIR = ARTIFACTS_DIR / "reportes"
 SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
-DELETE_BATCH_SETTLE_MS = 7_000
+INVENTORY_READY_WAIT_MS = 120_000
+SELECTION_RETRY_ATTEMPTS = 3
 
 
 def required_secret(name: str) -> str:
@@ -160,6 +162,14 @@ def inventory_is_empty(page: Page) -> bool:
     return visible_locator(empty_message) is not None
 
 
+def inventory_processing_visible(page: Page) -> bool:
+    processing_messages = [
+        page.get_by_text(re.compile(r"por favor espere", re.I)),
+        page.get_by_text(re.compile(r"este proceso puede tardar varios segundos", re.I)),
+    ]
+    return any(visible_locator(locator) is not None for locator in processing_messages)
+
+
 def awb_checkbox(page: Page):
     header_pattern = re.compile(r"^\s*AWB\s*$", re.I)
     candidates = [
@@ -189,14 +199,84 @@ def awb_checkbox(page: Page):
     return None
 
 
+def inventory_row_checkboxes(page: Page):
+    selectors = [
+        "table tbody tr td:first-child input[type='checkbox']",
+        "table tr td:first-child input[type='checkbox']",
+        "tr td:first-child input[type='checkbox']",
+    ]
+    for selector in selectors:
+        locator = page.locator(selector)
+        try:
+            if locator.count() > 0:
+                return locator
+        except Exception:
+            continue
+    return None
+
+
+def selected_inventory_rows(page: Page) -> int | None:
+    rows = inventory_row_checkboxes(page)
+    if rows is None:
+        return None
+    selected = 0
+    for index in range(rows.count()):
+        candidate = rows.nth(index)
+        try:
+            if candidate.is_visible() and candidate.is_checked():
+                selected += 1
+        except Exception:
+            continue
+    return selected
+
+
+def wait_for_inventory_ready(page: Page) -> None:
+    deadline = monotonic() + INVENTORY_READY_WAIT_MS / 1_000
+    while monotonic() < deadline:
+        if inventory_is_empty(page):
+            return
+        if not inventory_processing_visible(page) and awb_checkbox(page) is not None:
+            return
+        page.wait_for_timeout(500)
+    raise RuntimeError(
+        "Komet no terminó de actualizar la tabla de inventario dentro del tiempo esperado."
+    )
+
+
 def select_all_inventory(page: Page) -> None:
-    checkbox = awb_checkbox(page)
-    if checkbox is None:
-        raise RuntimeError("No se encontró la casilla para seleccionar todas las cajas junto a AWB.")
-    if not checkbox.is_checked():
-        checkbox.click(timeout=15_000)
-    page.wait_for_timeout(700)
-    print("Todas las cajas visibles fueron seleccionadas mediante AWB.", flush=True)
+    for attempt in range(1, SELECTION_RETRY_ATTEMPTS + 1):
+        checkbox = awb_checkbox(page)
+        if checkbox is None:
+            raise RuntimeError("No se encontró la casilla para seleccionar todas las cajas junto a AWB.")
+
+        selected = selected_inventory_rows(page)
+        if selected is not None and selected > 0:
+            print("Todas las cajas visibles fueron seleccionadas mediante AWB.", flush=True)
+            return
+
+        # Komet puede conservar marcado el encabezado aunque la tabla ya haya
+        # sido recargada con filas nuevas sin seleccionar. Normalizar el estado
+        # evita que el siguiente clic deje las filas desmarcadas.
+        if checkbox.is_checked():
+            checkbox.click(timeout=15_000)
+            page.wait_for_timeout(300)
+            checkbox = awb_checkbox(page)
+            if checkbox is None:
+                raise RuntimeError("La casilla AWB desapareció mientras se actualizaba la tabla.")
+        if not checkbox.is_checked():
+            checkbox.click(timeout=15_000)
+        page.wait_for_timeout(700)
+
+        if inventory_is_empty(page):
+            return
+        selected = selected_inventory_rows(page)
+        if selected is None or selected > 0:
+            print("Todas las cajas visibles fueron seleccionadas mediante AWB.", flush=True)
+            return
+        if attempt < SELECTION_RETRY_ATTEMPTS:
+            print("Aviso: AWB no confirmó la selección; reintentando.", flush=True)
+            page.wait_for_timeout(1_000)
+    raise RuntimeError("Komet no confirmó la selección de las cajas mediante AWB.")
 
 
 def confirmation_input(page: Page):
@@ -230,12 +310,39 @@ def confirmation_input(page: Page):
     return None
 
 
+def selection_required_visible(page: Page) -> bool:
+    return visible_locator(
+        page.get_by_text(
+            re.compile(r"debe seleccionar por lo menos un producto", re.I)
+        )
+    ) is not None
+
+
+def dismiss_selection_required(page: Page) -> bool:
+    if not selection_required_visible(page):
+        return False
+    click_first_visible(
+        page,
+        [
+            page.get_by_role("dialog").get_by_role("button", name=re.compile(r"^ok$", re.I)),
+            page.get_by_role("button", name=re.compile(r"^ok$", re.I)),
+            page.get_by_text(re.compile(r"^ok$", re.I)),
+            page.locator('input[value="OK" i]'),
+        ],
+        "Cerrar aviso de selección",
+    )
+    page.wait_for_timeout(500)
+    return True
+
+
 def wait_for_confirmation_input(page: Page):
     attempts = CONFIRMATION_DIALOG_WAIT_MS // 500
     for _ in range(attempts):
         found = confirmation_input(page)
         if found is not None:
             return found
+        if selection_required_visible(page):
+            return None
         if inventory_is_empty(page):
             return None
         page.wait_for_timeout(500)
@@ -243,7 +350,8 @@ def wait_for_confirmation_input(page: Page):
 
 
 def confirm_mass_delete(page: Page) -> bool:
-    for attempt in range(1, 3):
+    for attempt in range(1, SELECTION_RETRY_ATTEMPTS + 1):
+        dismiss_selection_required(page)
         click_first_visible(
             page,
             [
@@ -263,11 +371,20 @@ def confirm_mass_delete(page: Page) -> bool:
         confirmation_field = wait_for_confirmation_input(page)
         if confirmation_field is not None:
             break
+        if dismiss_selection_required(page):
+            if attempt == SELECTION_RETRY_ATTEMPTS:
+                raise RuntimeError(
+                    "Komet siguió rechazando el borrado porque no confirmó la selección de productos."
+                )
+            select_all_inventory(page)
+            page.wait_for_timeout(1_000)
+            continue
         if inventory_is_empty(page):
             print("Kometsales ya no muestra cajas para borrar.", flush=True)
             return False
-        if attempt == 1:
+        if attempt < SELECTION_RETRY_ATTEMPTS:
             print("Aviso: el cuadro de confirmación tardó en abrir; reintentando la acción.", flush=True)
+            wait_for_inventory_ready(page)
             page.wait_for_timeout(2_000)
     else:
         raise RuntimeError(
@@ -299,10 +416,10 @@ def delete_all_inventory(page: Page) -> None:
         if not confirm_mass_delete(page):
             return
         page.wait_for_timeout(1_000)
+        # Komet termina el borrado en segundo plano. Esperar a que desaparezca
+        # el modal real evita abrir el siguiente lote durante la actualización.
+        wait_for_inventory_ready(page)
         wait_for_network(page)
-        # Kometsales termina el borrado en segundo plano. Esperar evita abrir
-        # el siguiente cuadro mientras aún se está actualizando la tabla.
-        page.wait_for_timeout(DELETE_BATCH_SETTLE_MS)
         capture(page, f"02_borrado_{batch:02d}.png")
     raise RuntimeError(f"El inventario no quedó vacío después de {MAX_DELETE_BATCHES} lotes.")
 
