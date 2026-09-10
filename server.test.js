@@ -20,6 +20,29 @@ test('normalizes a small inline logo in the Cajas email config', () => {
   assert.equal(config.logoContentType, 'image/png');
 });
 
+test('normalizes a SharePoint logo reference in the Cajas email config', () => {
+  const config = app.normalizeCajasEmailConfig({
+    recipients: ['destino@example.com'],
+    cc: [],
+    bcc: [],
+    subject: 'Reporte',
+    bodyHtml: '<p>Listo</p>',
+    logoSharePoint: {
+      driveId: 'drive-1',
+      itemId: 'item-1',
+      name: 'cajas-email-logo.png',
+      contentType: 'image/png',
+    },
+  });
+
+  assert.deepEqual(config.logoSharePoint, {
+    driveId: 'drive-1',
+    itemId: 'item-1',
+    name: 'cajas-email-logo.png',
+    contentType: 'image/png',
+  });
+});
+
 test('rejects unsupported inline logo formats', () => {
   assert.throws(
     () => app.normalizeCajasEmailConfig({

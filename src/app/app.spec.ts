@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { HttpClient } from '@angular/common/http';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { App } from './app';
@@ -111,7 +112,7 @@ describe('App', () => {
     await new Promise<void>((resolve, reject) => {
       const startedAt = Date.now();
       const waitForReader = () => {
-        if (app.emailLogoData) {
+        if (app.emailLogoFile) {
           resolve();
         } else if (Date.now() - startedAt > 1000) {
           reject(new Error('El FileReader no terminó a tiempo.'));
@@ -124,8 +125,8 @@ describe('App', () => {
 
     expect(app.emailLogoName).toBe('logo.png');
     expect(app.emailLogoContentType).toBe('image/png');
-    expect(app.emailLogoData).toBe('data:image/png;base64,bG9nbw==');
-    expect(app.emailLogoPreview).toBe('data:image/png;base64,bG9nbw==');
+    expect(app.emailLogoFile).toBe(file);
+    expect(app.emailLogoData).toBe('');
   });
 
   it('should preserve a legacy logo URL when saving without a new logo', async () => {
@@ -151,6 +152,59 @@ describe('App', () => {
         subject: 'Reporte',
         bodyHtml: '<p>Listo</p>',
         logoUrl: 'https://example.com/logo.png',
+        logoData: '',
+        logoName: '',
+        logoContentType: '',
+      },
+      message: 'Guardado',
+    });
+    await save;
+    http.verify();
+  });
+
+  it('should upload a selected logo before saving its SharePoint reference', async () => {
+    const http = TestBed.inject(HttpTestingController);
+    const httpClient = TestBed.inject(HttpClient);
+    const app = new App(httpClient) as any;
+    app.emailTo = 'destino@example.com';
+    app.emailSubject = 'Reporte';
+    app.emailBodyHtml = '<p>Listo</p>';
+    app.emailLogoFile = new File(['logo'], 'logo.png', { type: 'image/png' });
+    app.emailLogoData = '';
+    app.emailLogoName = 'logo.png';
+    app.emailLogoContentType = 'image/png';
+    app.emailLogoReference = null;
+    app.emailLogoCleared = false;
+
+    const save = app.saveEmailConfig();
+    const uploadRequest = http.expectOne('/api/workflows/cajas/email-logo');
+    expect(uploadRequest.request.method).toBe('POST');
+    expect(uploadRequest.request.body).toBe(app.emailLogoFile);
+    uploadRequest.flush({
+      logoSharePoint: {
+        driveId: 'drive-1',
+        itemId: 'item-1',
+        name: 'cajas-email-logo.png',
+        contentType: 'image/png',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const saveRequest = http.expectOne('/api/workflows/cajas/email-config');
+    expect(saveRequest.request.body.logoSharePoint.itemId).toBe('item-1');
+    saveRequest.flush({
+      config: {
+        recipients: ['destino@example.com'],
+        cc: [],
+        bcc: [],
+        subject: 'Reporte',
+        bodyHtml: '<p>Listo</p>',
+        logoSharePoint: {
+          driveId: 'drive-1',
+          itemId: 'item-1',
+          name: 'cajas-email-logo.png',
+          contentType: 'image/png',
+        },
         logoData: '',
         logoName: '',
         logoContentType: '',

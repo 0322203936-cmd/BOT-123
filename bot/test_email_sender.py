@@ -93,6 +93,47 @@ class EmailSenderTests(unittest.TestCase):
         self.assertIn('src="cid:cajas-logo"', message["body"]["content"])
         self.assertNotIn("data:image/png", message["body"]["content"])
 
+    def test_loads_sharepoint_logo_reference(self):
+        config = load_email_config(
+            json.dumps(
+                {
+                    "recipients": ["destino@example.com"],
+                    "cc": [],
+                    "bcc": [],
+                    "subject": "Reporte",
+                    "bodyHtml": "<p>Listo</p>",
+                    "logoSharePoint": {
+                        "driveId": "drive-1",
+                        "itemId": "item-1",
+                        "name": "cajas-email-logo.png",
+                        "contentType": "image/png",
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(config["logoSharePoint"]["driveId"], "drive-1")
+        self.assertEqual(config["logoSharePoint"]["itemId"], "item-1")
+
+    def test_builds_graph_message_with_sharepoint_logo_reference(self):
+        message = build_graph_message(
+            {
+                "recipients": ["destino@example.com"],
+                "cc": [],
+                "bcc": [],
+                "subject": "Reporte de cajas",
+                "bodyHtml": "<p>Listo</p>",
+                "logoSharePoint": {
+                    "driveId": "drive-1",
+                    "itemId": "item-1",
+                    "name": "cajas-email-logo.png",
+                    "contentType": "image/png",
+                },
+            }
+        )
+
+        self.assertIn('src="cid:cajas-logo"', message["body"]["content"])
+
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.post", create=True)
@@ -134,6 +175,168 @@ class EmailSenderTests(unittest.TestCase):
         self.assertEqual(inline_payload["contentId"], "cajas-logo")
         self.assertEqual(inline_payload["contentBytes"], "bG9nbw==")
         self.assertFalse(put.called)
+        self.assertFalse(delete.called)
+
+    @patch("email_sender.requests.delete", create=True)
+    @patch("email_sender.requests.put", create=True)
+    @patch("email_sender.requests.get", create=True)
+    @patch("email_sender.requests.post", create=True)
+    def test_downloads_sharepoint_logo_and_uploads_it_inline(self, post, get, put, delete):
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+            content = b"logo"
+
+            def __init__(self, payload=None):
+                self.payload = payload or {}
+
+            def json(self):
+                return self.payload
+
+            def iter_content(self, chunk_size=None):
+                yield self.content
+
+            def close(self):
+                pass
+
+        post.side_effect = [Response({"id": "draft-1"}), Response(), Response(), Response()]
+        get.return_value = Response()
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            report.write_bytes(b"report")
+            send_report_email(
+                {
+                    "recipients": ["destino@example.com"],
+                    "cc": [],
+                    "bcc": [],
+                    "subject": "Reporte",
+                    "bodyHtml": "<p>Listo</p>",
+                    "logoSharePoint": {
+                        "driveId": "drive-1",
+                        "itemId": "item-1",
+                        "name": "cajas-email-logo.png",
+                        "contentType": "image/png",
+                    },
+                },
+                "remitente@example.com",
+                report,
+                token="token",
+            )
+
+        self.assertEqual(get.call_count, 1)
+        inline_payload = post.call_args_list[1].kwargs["json"]
+        self.assertTrue(inline_payload["isInline"])
+        self.assertEqual(inline_payload["contentId"], "cajas-logo")
+        self.assertEqual(inline_payload["contentBytes"], "bG9nbw==")
+        self.assertFalse(put.called)
+        self.assertFalse(delete.called)
+
+    @patch("email_sender.requests.delete", create=True)
+    @patch("email_sender.requests.put", create=True)
+    @patch("email_sender.requests.get", create=True)
+    @patch("email_sender.requests.post", create=True)
+    def test_rejects_sharepoint_logo_over_10_mb_without_creating_a_draft(self, post, get, put, delete):
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def iter_content(self, chunk_size=None):
+                yield b"x" * (10 * 1024 * 1024)
+                yield b"x"
+
+            def close(self):
+                pass
+
+        get.return_value = Response()
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            report.write_bytes(b"report")
+            with self.assertRaises(EmailConfigError):
+                send_report_email(
+                    {
+                        "recipients": ["destino@example.com"],
+                        "cc": [],
+                        "bcc": [],
+                        "subject": "Reporte",
+                        "bodyHtml": "<p>Listo</p>",
+                        "logoSharePoint": {
+                            "driveId": "drive-1",
+                            "itemId": "item-1",
+                            "name": "cajas-email-logo.png",
+                            "contentType": "image/png",
+                        },
+                    },
+                    "remitente@example.com",
+                    report,
+                    token="token",
+                )
+
+        self.assertFalse(post.called)
+        self.assertFalse(put.called)
+        self.assertFalse(delete.called)
+
+    @patch("email_sender.requests.delete", create=True)
+    @patch("email_sender.requests.put", create=True)
+    @patch("email_sender.requests.get", create=True)
+    @patch("email_sender.requests.post", create=True)
+    def test_uploads_large_sharepoint_logo_as_inline_upload_session(self, post, get, put, delete):
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def __init__(self, payload=None):
+                self.payload = payload or {}
+
+            def json(self):
+                return self.payload
+
+            def iter_content(self, chunk_size=None):
+                yield b"x" * (3 * 1024 * 1024 + 1)
+
+            def close(self):
+                pass
+
+        post.side_effect = [
+            Response({"id": "draft-1"}),
+            Response({"uploadUrl": "https://upload.example/logo-session"}),
+            Response(),
+            Response(),
+        ]
+        get.return_value = Response()
+        put.return_value = Response()
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            report.write_bytes(b"report")
+            send_report_email(
+                {
+                    "recipients": ["destino@example.com"],
+                    "cc": [],
+                    "bcc": [],
+                    "subject": "Reporte",
+                    "bodyHtml": "<p>Listo</p>",
+                    "logoSharePoint": {
+                        "driveId": "drive-1",
+                        "itemId": "item-1",
+                        "name": "cajas-email-logo.png",
+                        "contentType": "image/png",
+                    },
+                },
+                "remitente@example.com",
+                report,
+                token="token",
+            )
+
+        inline_session = post.call_args_list[1].kwargs["json"]["AttachmentItem"]
+        self.assertTrue(inline_session["isInline"])
+        self.assertEqual(inline_session["contentId"], "cajas-logo")
+        self.assertEqual(inline_session["contentType"], "image/png")
+        self.assertEqual(put.call_count, 1)
         self.assertFalse(delete.called)
 
     @patch("email_sender.requests.delete", create=True)

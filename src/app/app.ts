@@ -41,6 +41,14 @@ interface CajasEmailConfig {
   logoData: string;
   logoName: string;
   logoContentType: string;
+  logoSharePoint: CajasLogoReference | null;
+}
+
+interface CajasLogoReference {
+  driveId: string;
+  itemId: string;
+  name: string;
+  contentType: string;
 }
 
 interface CajasEmailConfigResponse {
@@ -58,9 +66,10 @@ const defaultCajasEmailConfig: CajasEmailConfig = {
   logoData: '',
   logoName: '',
   logoContentType: '',
+  logoSharePoint: null,
 };
 
-const MAX_EMAIL_LOGO_BYTES = 24 * 1024;
+const MAX_EMAIL_LOGO_BYTES = 10 * 1024 * 1024;
 const EMAIL_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
 
 @Component({
@@ -112,6 +121,9 @@ export class App implements OnInit, OnDestroy {
   protected emailLogoContentType = '';
   protected emailLogoPreview = '';
   protected emailLegacyLogoUrl = '';
+  protected emailLogoFile: File | null = null;
+  protected emailLogoReference: CajasLogoReference | null = null;
+  protected emailLogoCleared = false;
   protected password = '';
 
   private refreshTimer?: ReturnType<typeof setInterval>;
@@ -147,6 +159,7 @@ export class App implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.clockTimer) clearInterval(this.clockTimer);
+    this.revokeLogoPreview();
   }
 
   protected async connect(showError = true): Promise<void> {
@@ -293,7 +306,25 @@ export class App implements OnInit, OnDestroy {
 
     this.emailSaving.set(true);
     this.error.set('');
+    let uploadedLogoReference: CajasLogoReference | null = null;
     try {
+      const logoFile = this.emailLogoFile;
+      let logoReference = this.emailLogoReference;
+      if (logoFile) {
+        const uploadResponse = await firstValueFrom(
+          this.http.post<{ logoSharePoint: CajasLogoReference }>(
+            '/api/workflows/cajas/email-logo',
+            logoFile,
+            {
+              headers: { ...this.authHeaders(), 'Content-Type': logoFile.type },
+            },
+          ),
+        );
+        logoReference = uploadResponse.logoSharePoint;
+        uploadedLogoReference = logoReference;
+      }
+      const hasNewLogo = Boolean(logoFile || logoReference);
+      const clearLogo = this.emailLogoCleared && !logoFile;
       const response = await firstValueFrom(
         this.http.put<{ config: CajasEmailConfig; message: string }>(
           '/api/workflows/cajas/email-config',
@@ -306,7 +337,8 @@ export class App implements OnInit, OnDestroy {
             logoData: this.emailLogoData,
             logoName: this.emailLogoName,
             logoContentType: this.emailLogoContentType,
-            logoUrl: this.emailLogoData ? '' : this.emailLegacyLogoUrl,
+            logoSharePoint: clearLogo ? null : logoReference,
+            logoUrl: hasNewLogo || clearLogo ? '' : this.emailLegacyLogoUrl,
           },
           { headers: this.authHeaders() },
         ),
@@ -316,6 +348,18 @@ export class App implements OnInit, OnDestroy {
       this.message.set(response.message);
       this.emailPanelOpen.set(false);
     } catch (error) {
+      if (uploadedLogoReference) {
+        try {
+          await firstValueFrom(
+            this.http.delete('/api/workflows/cajas/email-logo', {
+              headers: this.authHeaders(),
+              body: uploadedLogoReference,
+            }),
+          );
+        } catch {
+          // La limpieza es preventiva; conserva el error original para el usuario.
+        }
+      }
       this.error.set(this.getErrorMessage(error));
     } finally {
       this.emailSaving.set(false);
@@ -334,33 +378,36 @@ export class App implements OnInit, OnDestroy {
     }
     if (file.size > MAX_EMAIL_LOGO_BYTES) {
       input.value = '';
-      this.error.set('El logo debe pesar como máximo 24 KB.');
+      this.error.set('El logo debe pesar como máximo 10 MB.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        this.error.set('No fue posible leer el archivo del logo.');
-        return;
-      }
-      this.emailLogoData = reader.result;
-      this.emailLogoName = file.name;
-      this.emailLogoContentType = file.type;
-      this.emailLogoPreview = reader.result;
-      this.emailLegacyLogoUrl = '';
-      this.error.set('');
-    };
-    reader.onerror = () => this.error.set('No fue posible leer el archivo del logo.');
-    reader.readAsDataURL(file);
+    this.revokeLogoPreview();
+    this.emailLogoFile = file;
+    this.emailLogoReference = null;
+    this.emailLogoData = '';
+    this.emailLogoName = file.name;
+    this.emailLogoContentType = file.type;
+    this.emailLogoPreview = URL.createObjectURL(file);
+    this.emailLegacyLogoUrl = '';
+    this.emailLogoCleared = false;
+    this.error.set('');
   }
 
   protected clearLogo(): void {
+    this.revokeLogoPreview();
+    this.emailLogoFile = null;
+    this.emailLogoReference = null;
     this.emailLogoData = '';
     this.emailLogoName = '';
     this.emailLogoContentType = '';
     this.emailLogoPreview = '';
     this.emailLegacyLogoUrl = '';
+    this.emailLogoCleared = true;
+  }
+
+  private revokeLogoPreview(): void {
+    if (this.emailLogoPreview.startsWith('blob:')) URL.revokeObjectURL(this.emailLogoPreview);
   }
 
   private downloadFilename(contentDisposition: string | null): string {
@@ -378,15 +425,19 @@ export class App implements OnInit, OnDestroy {
 
   private setEmailConfig(config: CajasEmailConfig): void {
     const value = { ...defaultCajasEmailConfig, ...config };
+    this.revokeLogoPreview();
     this.emailTo = value.recipients.join(', ');
     this.emailCc = value.cc.join(', ');
     this.emailBcc = value.bcc.join(', ');
     this.emailSubject = value.subject;
     this.emailBodyHtml = value.bodyHtml;
+    this.emailLogoFile = null;
+    this.emailLogoReference = value.logoSharePoint;
+    this.emailLogoCleared = false;
     this.emailLogoData = value.logoData;
     this.emailLegacyLogoUrl = value.logoUrl || '';
-    this.emailLogoName = value.logoName || (this.emailLegacyLogoUrl ? 'Logo guardado anteriormente' : '');
-    this.emailLogoContentType = value.logoContentType;
+    this.emailLogoName = value.logoSharePoint?.name || value.logoName || (this.emailLegacyLogoUrl ? 'Logo guardado anteriormente' : '');
+    this.emailLogoContentType = value.logoSharePoint?.contentType || value.logoContentType;
     this.emailLogoPreview = value.logoData || this.emailLegacyLogoUrl;
   }
 
