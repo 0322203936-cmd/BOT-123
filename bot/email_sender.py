@@ -19,6 +19,7 @@ SIMPLE_ATTACHMENT_LIMIT = 3 * 1024 * 1024
 MAX_ATTACHMENT_SIZE = 150 * 1024 * 1024
 MAX_INLINE_LOGO_SIZE = 24 * 1024
 MAX_SHAREPOINT_LOGO_SIZE = 10 * 1024 * 1024
+DIRECT_SEND_PAYLOAD_LIMIT = 3 * 1024 * 1024
 INLINE_LOGO_CONTENT_ID = "cajas-logo"
 
 
@@ -215,6 +216,57 @@ def build_inline_logo_attachment(config: dict) -> dict | None:
         "contentId": INLINE_LOGO_CONTENT_ID,
         "isInline": True,
     }
+
+
+def build_file_attachment(
+    attachment_path: Path,
+    *,
+    content_id: str | None = None,
+    content_type: str | None = None,
+) -> dict:
+    payload = {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "name": attachment_path.name,
+        "contentType": content_type
+        or mimetypes.guess_type(attachment_path.name)[0]
+        or "application/octet-stream",
+        "contentBytes": base64.b64encode(attachment_path.read_bytes()).decode("ascii"),
+    }
+    if content_id:
+        payload["contentId"] = content_id
+        payload["isInline"] = True
+    return payload
+
+
+def build_direct_send_payload(
+    config: dict,
+    attachment_path: Path,
+    sharepoint_logo_path: Path | None,
+) -> dict:
+    message = build_graph_message(config)
+    attachments: list[dict] = []
+    if sharepoint_logo_path:
+        attachments.append(
+            build_file_attachment(
+                sharepoint_logo_path,
+                content_id=INLINE_LOGO_CONTENT_ID,
+                content_type=config["logoSharePoint"]["contentType"],
+            )
+        )
+    else:
+        inline_logo = build_inline_logo_attachment(config)
+        if inline_logo:
+            attachments.append(inline_logo)
+    attachments.append(build_file_attachment(attachment_path))
+    message["attachments"] = attachments
+    payload = {"message": message, "saveToSentItems": True}
+    payload_size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+    if payload_size > DIRECT_SEND_PAYLOAD_LIMIT:
+        raise EmailConfigError(
+            "El correo con el Excel y el logo supera el límite para enviarlo solo con "
+            "Mail.Send. Reduce el tamaño del logo o habilita Mail.ReadWrite."
+        )
+    return payload
 
 
 def _download_sharepoint_logo(token: str, config: dict) -> Path | None:
@@ -422,46 +474,14 @@ def send_report_email(
     clean_sender = sender.strip()
     sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
     try:
-        message_id = _create_draft(graph_access_token, clean_sender, build_graph_message(config))
-        try:
-            if sharepoint_logo_path:
-                _upload_inline_logo_file(
-                    graph_access_token,
-                    clean_sender,
-                    message_id,
-                    sharepoint_logo_path,
-                    config["logoSharePoint"]["contentType"],
-                )
-            else:
-                _upload_inline_logo(graph_access_token, clean_sender, message_id, config)
-            if attachment_size < SIMPLE_ATTACHMENT_LIMIT:
-                _upload_small_attachment(graph_access_token, clean_sender, message_id, attachment_path)
-            else:
-                _upload_large_attachment(graph_access_token, clean_sender, message_id, attachment_path)
-        except Exception:
-            # El borrador no debe quedar guardado si falla la carga del adjunto.
-            try:
-                requests.delete(
-                    _user_path(clean_sender, f"messages/{quote(message_id, safe='')}"),
-                    headers=graph_headers(graph_access_token),
-                    timeout=30,
-                )
-            except Exception:
-                pass
-            raise
-
-        try:
-            response = requests.post(
-                _user_path(clean_sender, f"messages/{quote(message_id, safe='')}/send"),
-                headers=graph_headers(graph_access_token),
-                timeout=30,
-            )
-            _raise_for_graph(response, "enviar el correo")
-        except requests.RequestException as exc:
-            raise RuntimeError(
-                "Graph no confirmó el envío. El borrador se conserva para revisión; "
-                "verifica Borradores y Elementos enviados antes de reejecutar."
-            ) from exc
+        payload = build_direct_send_payload(config, attachment_path, sharepoint_logo_path)
+        response = requests.post(
+            _user_path(clean_sender, "sendMail"),
+            headers={**graph_headers(graph_access_token), "Content-Type": "application/json"},
+            json=payload,
+            timeout=120,
+        )
+        _raise_for_graph(response, "enviar el correo")
         print(f"Correo enviado con {attachment_path.name} a {len(config['recipients'])} destinatario(s).", flush=True)
     finally:
         if sharepoint_logo_path:
