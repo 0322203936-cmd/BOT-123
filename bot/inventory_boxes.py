@@ -18,8 +18,7 @@ from sharepoint_sync import (
 from email_sender import load_email_config, send_report_email
 from inventory_box_transform import (
     create_single_sheet_workbook,
-    normalize_date_formats,
-    transform_inventory_workbook,
+    refresh_workbook_with_komet_inventory,
 )
 
 
@@ -152,6 +151,24 @@ def open_boxes(page: Page) -> None:
     wait_for_network(page)
     page.wait_for_timeout(1_500)
     capture(page, "01_cajas.png")
+
+
+def download_inventory_export(page: Page, destination: Path) -> None:
+    """Download the current Komet inventory before deleting or uploading boxes."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    print("Descargando inventario actual de Kometsales...", flush=True)
+    click_first_visible(
+        page,
+        [
+            page.get_by_role("button", name=re.compile(r"acciones", re.I)),
+            page.get_by_text(re.compile(r"^\s*acciones\s*$", re.I)),
+        ],
+        "Acciones",
+    )
+    with page.expect_download(timeout=60_000) as download_info:
+        click_text(page, "Exportar a Excel", "Exportar inventario a Excel")
+    download_info.value.save_as(str(destination))
+    print(f"Inventario de Kometsales descargado: {destination}", flush=True)
 
 
 def inventory_is_empty(page: Page) -> bool:
@@ -483,33 +500,27 @@ def current_local_date() -> date:
         raise RuntimeError(f"La zona horaria configurada no existe: {timezone_name}.") from exc
 
 
-def download_and_prepare_source() -> tuple[str, dict, Path]:
+def download_and_prepare_source(komet_inventory_path: Path) -> tuple[str, dict, Path]:
     token = graph_token()
     item = resolve_sharepoint_item_by_url(token, SHAREPOINT_BOXES_URL)
     source_path = download_sharepoint_file(token, item, SOURCE_FILENAME)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     run_date = current_local_date()
-    normalized_path = source_path.with_name(f"{source_path.stem}-normalizado.xlsx")
     destination = REPORTS_DIR / f"inventory-upload-boxes-{run_date.isoformat()}.xlsx"
 
-    changed = normalize_date_formats(source_path, normalized_path)
-    result = transform_inventory_workbook(
-        normalized_path,
+    result = refresh_workbook_with_komet_inventory(
+        source_path,
+        komet_inventory_path,
         destination,
         assumed_today=run_date,
     )
-    if result.final_sunday_rows or result.final_immediate_rows or not result.copied_data_correct:
-        raise RuntimeError(
-            "La validación del XLS transformado falló: "
-            f"domingos={result.final_sunday_rows}, "
-            f"fechas_en_ventana={result.final_immediate_rows}, "
-            f"datos_copiados_correctos={result.copied_data_correct}."
-        )
     print(
         f"XLS preparado desde SharePoint: {destination} | "
-        f"hoy={run_date.isoformat()} filas_originales={result.original_rows} "
-        f"filas_eliminadas={result.removed_rows} filas_agregadas={result.added_rows} "
-        f"fechas_normalizadas={changed}",
+        f"hoy={run_date.isoformat()} filas_inventory={result.inventory_rows} "
+        f"filas_availability={result.availability_rows} "
+        f"filas_reducidas={result.decreased_rows} "
+        f"total_antes={result.before_total:g} total_despues={result.after_total:g} "
+        f"formulas_reemplazadas={result.formula_cells_replaced}",
         flush=True,
     )
     return token, item, destination
@@ -520,18 +531,9 @@ def run() -> None:
     komet_password = required_secret("KOMET_PASSWORD")
     email_config = load_email_config(os.environ.get("CAJAS_EMAIL_CONFIG"))
     sender = required_secret("MAIL_SENDER") if email_config else ""
-    sharepoint_token, sharepoint_item, source_path = download_and_prepare_source()
-    upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
-    print(
-        "Información del Excel actualizada en el mismo archivo de SharePoint; "
-        "se conservará completo para SharePoint y correo, y se usará una copia "
-        "de la pestaña activa para Kometsales.",
-        flush=True,
-    )
-
+    komet_inventory_path = ARTIFACTS_DIR / "komet-inventory.xlsx"
     komet_upload_path = ARTIFACTS_DIR / "komet-upload.xlsx"
     try:
-        create_single_sheet_workbook(source_path, komet_upload_path)
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
@@ -540,6 +542,15 @@ def run() -> None:
                 login_kometsales(page, komet_user, komet_password)
                 capture(page, "00_sesion_iniciada.png")
                 open_boxes(page)
+                download_inventory_export(page, komet_inventory_path)
+                sharepoint_token, sharepoint_item, source_path = download_and_prepare_source(komet_inventory_path)
+                upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
+                print(
+                    "Información del Excel actualizada en el mismo archivo de SharePoint; "
+                    "Inventory fue reemplazada y se conservaron Availability y Customer View.",
+                    flush=True,
+                )
+                create_single_sheet_workbook(source_path, komet_upload_path)
                 delete_all_inventory(page)
                 upload_boxes(page, komet_upload_path)
                 print(f"Proceso completo. URL final: {page.url}", flush=True)
@@ -551,6 +562,7 @@ def run() -> None:
                 browser.close()
     finally:
         komet_upload_path.unlink(missing_ok=True)
+        komet_inventory_path.unlink(missing_ok=True)
 
     if not email_config:
         print(
