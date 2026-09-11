@@ -145,6 +145,42 @@ class EmailSenderTests(unittest.TestCase):
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.post", create=True)
+    def test_sends_one_individual_message_per_recipient(self, post, put, delete):
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            report.write_bytes(b"report")
+            send_report_email(
+                {
+                    "recipients": ["uno@example.com", "dos@example.com", "tres@example.com"],
+                    "cc": [],
+                    "bcc": [],
+                    "subject": "Reporte",
+                    "bodyHtml": "<p>Listo</p>",
+                },
+                "remitente@example.com",
+                report,
+                token="token",
+            )
+
+        self.assertEqual(post.call_count, 3)
+        sent_to = [
+            call.kwargs["json"]["message"]["toRecipients"][0]["emailAddress"]["address"]
+            for call in post.call_args_list
+        ]
+        self.assertEqual(sent_to, ["uno@example.com", "dos@example.com", "tres@example.com"])
+        for call in post.call_args_list:
+            self.assertEqual(len(call.kwargs["json"]["message"]["toRecipients"]), 1)
+            self.assertEqual(call.kwargs["json"]["message"]["ccRecipients"], [])
+            self.assertEqual(call.kwargs["json"]["message"]["bccRecipients"], [])
+
+    @patch("email_sender.requests.delete", create=True)
+    @patch("email_sender.requests.put", create=True)
+    @patch("email_sender.requests.post", create=True)
     def test_sends_logo_and_report_directly_without_creating_a_draft(self, post, put, delete):
         class Response:
             ok = True
