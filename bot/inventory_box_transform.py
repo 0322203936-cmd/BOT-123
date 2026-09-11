@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import Any, Sequence
 
+import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
@@ -496,6 +497,31 @@ def _inventory_rows(workbook, sheet_name: str, *, table_name: str | None = None)
     return rows, header_row, headers
 
 
+def _inventory_rows_from_xls(path: Path) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Read Komet's legacy binary Excel export without treating it as XLSX."""
+    frame = pd.read_excel(path, header=None, engine="xlrd")
+    values = frame.astype(object).where(pd.notna(frame), None).values.tolist()
+    required_headers = {"product", "qty", "aging"}
+    for row_index, row_values in enumerate(values[:30], start=1):
+        headers = {
+            str(value).strip().lower(): column_index
+            for column_index, value in enumerate(row_values, start=1)
+            if value is not None and str(value).strip()
+        }
+        if not required_headers.issubset(headers):
+            continue
+        rows: list[dict[str, Any]] = []
+        for row_values in values[row_index:]:
+            row = {name: row_values[column - 1] if column <= len(row_values) else None for name, column in headers.items()}
+            if not any(value is not None and value != "" for value in row.values()):
+                continue
+            if not str(row.get("product") or "").strip():
+                continue
+            rows.append(row)
+        return rows, row_index, headers
+    raise RuntimeError("El XLS de Komet no contiene las columnas Product, Qty y Aging.")
+
+
 def _inventory_key(row: dict[str, Any], assumed_today: date, *, use_awb_date: bool = False) -> tuple[str, date] | None:
     product = _normalized_product(row.get("product"))
     aging = _numeric_quantity(row.get("aging"))
@@ -561,12 +587,15 @@ def refresh_workbook_with_komet_inventory(
 
         old_inventory_book = workbook
         old_inventory_rows, _, _ = _inventory_rows(old_inventory_book, "Inventory", table_name="tblInventory")
-        komet_book = load_workbook(komet_inventory_path, data_only=False, keep_links=True)
-        try:
-            source_sheet_name = komet_book.sheetnames[0]
-            new_inventory_rows, _, _ = _inventory_rows(komet_book, source_sheet_name)
-        finally:
-            komet_book.close()
+        if komet_inventory_path.suffix.lower() == ".xls":
+            new_inventory_rows, _, _ = _inventory_rows_from_xls(komet_inventory_path)
+        else:
+            komet_book = load_workbook(komet_inventory_path, data_only=False, keep_links=True)
+            try:
+                source_sheet_name = komet_book.sheetnames[0]
+                new_inventory_rows, _, _ = _inventory_rows(komet_book, source_sheet_name)
+            finally:
+                komet_book.close()
 
         old_inventory_totals = _aggregate_inventory(old_inventory_rows, assumed_today, use_awb_date=True)
         new_inventory_totals = _aggregate_inventory(new_inventory_rows, assumed_today)

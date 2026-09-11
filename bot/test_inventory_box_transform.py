@@ -2,7 +2,9 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.table import Table
 from openpyxl.styles import Font, PatternFill
@@ -13,7 +15,7 @@ try:
         create_single_sheet_workbook,
         transform_inventory_workbook,
         refresh_workbook_with_komet_inventory,
-    )
+)
 except ImportError:
     try:
         from bot.inventory_box_transform import (
@@ -27,9 +29,28 @@ except ImportError:
         create_single_sheet_workbook = None
         transform_inventory_workbook = None
         refresh_workbook_with_komet_inventory = None
+try:
+    from inventory_box_transform import _inventory_rows_from_xls
+except ImportError:
+    _inventory_rows_from_xls = None
 
 
 class InventoryBoxTransformTests(unittest.TestCase):
+    @patch("pandas.read_excel")
+    def test_reads_legacy_xls_inventory_export(self, read_excel):
+        read_excel.return_value = pd.DataFrame([
+            ["Pricing", None, None],
+            ["AWB", "Product", "Aging", "Qty"],
+            ["000-2026-0911", "Rose Red", -2, 4],
+        ])
+
+        rows, header_row, headers = _inventory_rows_from_xls(Path("pricing.xls"))
+
+        self.assertEqual(header_row, 2)
+        self.assertEqual(headers["product"], 2)
+        self.assertEqual(rows[0]["product"], "Rose Red")
+        self.assertEqual(rows[0]["qty"], 4)
+
     assumed_today = date(2026, 9, 10)
 
     def test_removes_window_and_sundays_and_adds_one_row_per_product(self) -> None:
