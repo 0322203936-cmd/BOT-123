@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 import types
 import unittest
 from unittest.mock import patch
+from unittest.mock import MagicMock
 
 from openpyxl import Workbook, load_workbook
 
@@ -44,6 +45,19 @@ class FakePage:
 
 
 class InventoryBoxesTests(unittest.TestCase):
+    @patch("inventory_boxes.click_text")
+    def test_downloads_inventory_export_from_actions_menu(self, click_text):
+        download = MagicMock()
+        download_info = MagicMock(value=download)
+        page = MagicMock()
+        page.expect_download.return_value.__enter__.return_value = download_info
+
+        destination = Path("artifacts/inventory_boxes/komet-inventory.xlsx")
+        inventory_boxes.download_inventory_export(page, destination)
+
+        click_text.assert_called_once_with(page, "Exportar a Excel", "Exportar inventario a Excel")
+        download.save_as.assert_called_once_with(str(destination))
+
     @patch("inventory_boxes.awb_checkbox")
     @patch("inventory_boxes.inventory_is_empty", return_value=False)
     @patch("inventory_boxes.selected_inventory_rows", side_effect=[0, 79])

@@ -4,9 +4,12 @@ from copy import copy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import re
 from typing import Any, Sequence
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils.datetime import from_excel
 
 
@@ -32,6 +35,17 @@ class InventoryTransformResult:
     final_sunday_rows: int
     final_immediate_rows: int
     copied_data_correct: bool
+
+
+@dataclass(frozen=True)
+class InventoryRefreshResult:
+    updated_rows: int
+    decreased_rows: int
+    before_total: float
+    after_total: float
+    inventory_rows: int
+    availability_rows: int
+    formula_cells_replaced: int
 
 
 def next_business_day(value: date) -> date:
@@ -411,6 +425,250 @@ def _verify_saved_workbook(
                     )
     finally:
         workbook.close()
+
+
+def _header_map(sheet, required_headers: set[str], *, max_rows: int = 30) -> tuple[int, dict[str, int]]:
+    for row in sheet.iter_rows(min_row=1, max_row=min(max_rows, sheet.max_row)):
+        headers = {
+            str(cell.value or "").strip().lower(): cell.column
+            for cell in row
+            if cell.value is not None and str(cell.value).strip()
+        }
+        if required_headers.issubset(headers):
+            return row[0].row, headers
+    raise RuntimeError(
+        "No se encontraron las columnas requeridas: "
+        + ", ".join(sorted(required_headers))
+        + "."
+    )
+
+
+def _table_bounds(sheet, table_name: str) -> tuple[int, int, int, int]:
+    try:
+        table = sheet.tables[table_name]
+    except KeyError as exc:
+        raise RuntimeError(f"La hoja {sheet.title} no contiene la tabla {table_name}.") from exc
+    return range_boundaries(table.ref)
+
+
+def _normalized_product(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()[:30]
+
+
+def _numeric_quantity(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _inventory_rows(workbook, sheet_name: str, *, table_name: str | None = None) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    sheet = workbook[sheet_name]
+    if table_name:
+        min_col, min_row, max_col, max_row = _table_bounds(sheet, table_name)
+        header_row = min_row
+        headers = {
+            str(sheet.cell(header_row, column).value or "").strip().lower(): column
+            for column in range(min_col, max_col + 1)
+        }
+    else:
+        header_row, headers = _header_map(sheet, {"product", "qty", "aging"})
+        min_col = min(headers.values())
+        max_col = max(headers.values())
+        max_row = sheet.max_row
+
+    rows: list[dict[str, Any]] = []
+    for row_number in range(header_row + 1, max_row + 1):
+        values = {
+            name: sheet.cell(row_number, column).value
+            for name, column in headers.items()
+            if min_col <= column <= max_col
+        }
+        if not any(value is not None and value != "" for value in values.values()):
+            continue
+        if not str(values.get("product") or "").strip():
+            continue
+        rows.append(values)
+    return rows, header_row, headers
+
+
+def _inventory_key(row: dict[str, Any], assumed_today: date, *, use_awb_date: bool = False) -> tuple[str, date] | None:
+    product = _normalized_product(row.get("product"))
+    aging = _numeric_quantity(row.get("aging"))
+    if not product or aging is None:
+        return None
+    base_date = assumed_today
+    if use_awb_date:
+        awb = str(row.get("awb") or "")
+        match = re.search(r"((?:19|20)\d{2})[-/]?(\d{2})[-/]?(\d{2})", awb)
+        if match:
+            base_date = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    return product, base_date + timedelta(days=abs(int(aging)))
+
+
+def _aggregate_inventory(rows: list[dict[str, Any]], assumed_today: date, *, use_awb_date: bool = False) -> dict[tuple[str, date], float]:
+    totals: dict[tuple[str, date], float] = {}
+    for row in rows:
+        key = _inventory_key(row, assumed_today, use_awb_date=use_awb_date)
+        quantity = _numeric_quantity(row.get("qty"))
+        if key is None or quantity is None:
+            continue
+        totals[key] = totals.get(key, 0) + quantity
+    return totals
+
+
+def _availability_current_quantity(
+    value: Any,
+    row: dict[str, Any],
+    old_inventory_totals: dict[tuple[str, date], float],
+    assumed_today: date,
+) -> float:
+    quantity = _numeric_quantity(value)
+    if quantity is not None:
+        return quantity
+    key = (row["product_key"], row["available"])
+    if key in old_inventory_totals:
+        return old_inventory_totals[key]
+    raise RuntimeError(
+        "No se pudo obtener la cantidad actual para una fórmula de Availability: "
+        f"producto={row['product']!r}, fecha={row['available']}.")
+
+
+def refresh_workbook_with_komet_inventory(
+    source_path: Path,
+    komet_inventory_path: Path,
+    output_path: Path,
+    *,
+    assumed_today: date,
+) -> InventoryRefreshResult:
+    workbook = load_workbook(source_path, data_only=False, keep_links=True)
+    try:
+        availability = workbook[KOMET_SHEET_NAME]
+        _, availability_header_row, availability_max_col, availability_max_row = _table_bounds(
+            availability, "tblAvailability"
+        )
+        availability_headers = {
+            str(availability.cell(availability_header_row, column).value or "").strip().lower(): column
+            for column in range(1, availability_max_col + 1)
+        }
+        required = {"product description", "qty packages", "available from"}
+        if not required.issubset(availability_headers):
+            raise RuntimeError("tblAvailability no contiene Product Description, Qty Packages y Available From.")
+
+        old_inventory_book = workbook
+        old_inventory_rows, _, _ = _inventory_rows(old_inventory_book, "Inventory", table_name="tblInventory")
+        komet_book = load_workbook(komet_inventory_path, data_only=False, keep_links=True)
+        try:
+            source_sheet_name = komet_book.sheetnames[0]
+            new_inventory_rows, _, _ = _inventory_rows(komet_book, source_sheet_name)
+        finally:
+            komet_book.close()
+
+        old_inventory_totals = _aggregate_inventory(old_inventory_rows, assumed_today, use_awb_date=True)
+        new_inventory_totals = _aggregate_inventory(new_inventory_rows, assumed_today)
+        _, new_inventory_rows = _write_inventory_rows_from_rows(
+            workbook,
+            new_inventory_rows,
+        )
+
+        before_total = 0.0
+        after_total = 0.0
+        updated_rows = 0
+        decreased_rows = 0
+        formula_cells_replaced = 0
+        for row_number in range(availability_header_row + 1, availability_max_row + 1):
+            product = availability.cell(row_number, availability_headers["product description"]).value
+            available_value = availability.cell(row_number, availability_headers["available from"]).value
+            available = _as_date(available_value, epoch=workbook.epoch)
+            if not product or available is None:
+                continue
+            product_key = _normalized_product(product)
+            current_cell = availability.cell(row_number, availability_headers["qty packages"])
+            current = _availability_current_quantity(
+                current_cell.value,
+                {"product": product, "product_key": product_key, "available": available},
+                old_inventory_totals,
+                assumed_today,
+            )
+            inventory_quantity = new_inventory_totals.get((product_key, available), 0.0)
+            final_quantity = min(current, inventory_quantity)
+            before_total += current
+            after_total += final_quantity
+            if final_quantity != current:
+                updated_rows += 1
+            if final_quantity < current:
+                decreased_rows += 1
+            if current_cell.value.__class__.__name__ == "ArrayFormula" or (
+                isinstance(current_cell.value, str) and current_cell.value.startswith("=")
+            ):
+                formula_cells_replaced += 1
+            current_cell.value = int(final_quantity) if final_quantity.is_integer() else final_quantity
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        workbook.save(output_path)
+    finally:
+        workbook.close()
+
+    verification = load_workbook(output_path, data_only=False)
+    try:
+        availability = verification[KOMET_SHEET_NAME]
+        inventory = verification["Inventory"]
+        _, _, _, inventory_end = _table_bounds(inventory, "tblInventory")
+        _, inventory_header_row, _, _ = _table_bounds(inventory, "tblInventory")
+        if inventory_end != inventory_header_row + len(new_inventory_rows):
+            raise RuntimeError("tblInventory no fue ampliada al número exacto de filas descargadas.")
+        qty_column = availability_headers["qty packages"]
+        for row_number in range(availability_header_row + 1, availability_max_row + 1):
+            value = availability.cell(row_number, qty_column).value
+            if (
+                isinstance(value, str) and value.startswith("=")
+            ) or value.__class__.__name__ == "ArrayFormula":
+                raise RuntimeError(f"Availability!{get_column_letter(qty_column)}{row_number} conserva una fórmula.")
+    finally:
+        verification.close()
+
+    return InventoryRefreshResult(
+        updated_rows=updated_rows,
+        decreased_rows=decreased_rows,
+        before_total=before_total,
+        after_total=after_total,
+        inventory_rows=len(new_inventory_rows),
+        availability_rows=availability_max_row - availability_header_row,
+        formula_cells_replaced=formula_cells_replaced,
+    )
+
+
+def _write_inventory_rows_from_rows(workbook, source_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    destination = workbook["Inventory"]
+    min_col, min_row, max_col, old_max_row = _table_bounds(destination, "tblInventory")
+    destination_headers = {
+        str(destination.cell(min_row, column).value or "").strip().lower(): column
+        for column in range(min_col, max_col + 1)
+    }
+    old_rows = [
+        {name: destination.cell(row, column).value for name, column in destination_headers.items()}
+        for row in range(min_row + 1, old_max_row + 1)
+    ]
+    clear_until = max(old_max_row, min_row + len(source_rows))
+    for row in range(min_row + 1, clear_until + 1):
+        for column in range(min_col, max_col + 1):
+            destination.cell(row, column).value = None
+    template_row = min_row + 1 if old_max_row >= min_row + 1 else min_row
+    for offset, source_row in enumerate(source_rows, start=1):
+        target_row = min_row + offset
+        if target_row != template_row:
+            _copy_row_format(destination, template_row, target_row, max_col)
+        for name, column in destination_headers.items():
+            destination.cell(target_row, column).value = source_row.get(name)
+    table = destination.tables["tblInventory"]
+    table.ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{min_row + len(source_rows)}"
+    if table.autoFilter:
+        table.autoFilter.ref = table.ref
+    return old_rows, source_rows
 
 
 def transform_inventory_workbook(
