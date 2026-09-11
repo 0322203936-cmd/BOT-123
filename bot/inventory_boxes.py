@@ -562,7 +562,6 @@ def run() -> None:
                 browser.close()
     finally:
         komet_upload_path.unlink(missing_ok=True)
-        komet_inventory_path.unlink(missing_ok=True)
 
     if not email_config:
         print(
