@@ -45,6 +45,15 @@ class FakePage:
 
 
 class InventoryBoxesTests(unittest.TestCase):
+    def test_workflow_keeps_original_komet_inventory_as_artifact(self):
+        workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "inventory-boxes.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("name: Guardar inventario original de Komet", workflow)
+        self.assertIn("path: artifacts/inventory_boxes/komet-inventory.xls", workflow)
+        self.assertIn("retention-days: 7", workflow)
+
     @patch("inventory_boxes.click_text")
     def test_downloads_inventory_export_from_actions_menu(self, click_text):
         download = MagicMock()

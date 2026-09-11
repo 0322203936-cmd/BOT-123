@@ -62,3 +62,16 @@ jobs:
           path: artifacts/inventory_boxes/reportes/*.xlsx
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Guardar inventario original de Komet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventario-original-komet-${{ github.run_number }}
+          path: artifacts/inventory_boxes/komet-inventory.xls
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Limpiar archivos temporales
+        if: always()
+        run: rm -f artifacts/inventory_boxes/komet-inventory.xls artifacts/inventory_boxes/komet-upload.xlsx
