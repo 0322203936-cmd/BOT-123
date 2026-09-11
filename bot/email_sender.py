@@ -474,14 +474,16 @@ def send_report_email(
     clean_sender = sender.strip()
     sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
     try:
-        payload = build_direct_send_payload(config, attachment_path, sharepoint_logo_path)
-        response = requests.post(
-            _user_path(clean_sender, "sendMail"),
-            headers={**graph_headers(graph_access_token), "Content-Type": "application/json"},
-            json=payload,
-            timeout=120,
-        )
-        _raise_for_graph(response, "enviar el correo")
+        for recipient in config["recipients"]:
+            recipient_config = {**config, "recipients": [recipient]}
+            payload = build_direct_send_payload(recipient_config, attachment_path, sharepoint_logo_path)
+            response = requests.post(
+                _user_path(clean_sender, "sendMail"),
+                headers={**graph_headers(graph_access_token), "Content-Type": "application/json"},
+                json=payload,
+                timeout=120,
+            )
+            _raise_for_graph(response, f"enviar el correo a {recipient}")
         print(f"Correo enviado con {attachment_path.name} a {len(config['recipients'])} destinatario(s).", flush=True)
     finally:
         if sharepoint_logo_path:
