@@ -531,7 +531,7 @@ def run() -> None:
     komet_password = required_secret("KOMET_PASSWORD")
     email_config = load_email_config(os.environ.get("CAJAS_EMAIL_CONFIG"))
     sender = required_secret("MAIL_SENDER") if email_config else ""
-    komet_inventory_path = ARTIFACTS_DIR / "komet-inventory.xlsx"
+    komet_inventory_path = ARTIFACTS_DIR / "komet-inventory.xls"
     komet_upload_path = ARTIFACTS_DIR / "komet-upload.xlsx"
     try:
         with sync_playwright() as playwright:
