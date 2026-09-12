@@ -201,6 +201,39 @@ class EmailSenderTests(unittest.TestCase):
     @patch("email_sender.requests.delete", create=True)
     @patch("email_sender.requests.put", create=True)
     @patch("email_sender.requests.post", create=True)
+    def test_sends_cc_only_on_the_first_individual_message(self, post, put, delete):
+        class Response:
+            ok = True
+            status_code = 200
+            text = ""
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            report.write_bytes(b"report")
+            send_report_email(
+                {
+                    "recipients": ["uno@example.com", "dos@example.com", "tres@example.com"],
+                    "cc": ["roberto@example.com"],
+                    "bcc": [],
+                    "subject": "Reporte",
+                    "bodyHtml": "<p>Listo</p>",
+                },
+                "remitente@example.com",
+                report,
+                token="token",
+            )
+
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(
+            post.call_args_list[0].kwargs["json"]["message"]["ccRecipients"],
+            [{"emailAddress": {"address": "roberto@example.com"}}],
+        )
+        self.assertEqual(post.call_args_list[1].kwargs["json"]["message"]["ccRecipients"], [])
+        self.assertEqual(post.call_args_list[2].kwargs["json"]["message"]["ccRecipients"], [])
+
+    @patch("email_sender.requests.delete", create=True)
+    @patch("email_sender.requests.put", create=True)
+    @patch("email_sender.requests.post", create=True)
     def test_sends_logo_and_report_directly_without_creating_a_draft(self, post, put, delete):
         class Response:
             ok = True

@@ -522,8 +522,14 @@ def send_report_email(
     sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
     sharepoint_pdf_path = _download_sharepoint_pdf(graph_access_token, config)
     try:
-        for recipient in config["recipients"]:
-            recipient_config = {**config, "recipients": [recipient], "pdfSharePointPath": sharepoint_pdf_path}
+        for index, recipient in enumerate(config["recipients"]):
+            recipient_config = {
+                **config,
+                "recipients": [recipient],
+                "cc": config["cc"] if index == 0 else [],
+                "bcc": config["bcc"] if index == 0 else [],
+                "pdfSharePointPath": sharepoint_pdf_path,
+            }
             payload = build_direct_send_payload(recipient_config, attachment_path, sharepoint_logo_path)
             response = requests.post(
                 _user_path(clean_sender, "sendMail"),
