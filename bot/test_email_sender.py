@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from email_sender import (
     EmailConfigError,
+    build_direct_send_payload,
     build_graph_message,
     load_email_config,
     send_report_email,
@@ -14,6 +15,25 @@ from email_sender import (
 
 
 class EmailSenderTests(unittest.TestCase):
+    def test_includes_sharepoint_pdf_with_report_attachment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "inventory.xlsx"
+            pdf = Path(directory) / "guide.pdf"
+            report.write_bytes(b"report")
+            pdf.write_bytes(b"pdf")
+            payload = build_direct_send_payload(
+                {
+                    "recipients": ["destino@example.com"], "cc": [], "bcc": [],
+                    "subject": "Reporte", "bodyHtml": "<p>Listo</p>",
+                    "logoData": "", "logoSharePoint": None, "logoUrl": "",
+                    "pdfSharePointPath": pdf,
+                },
+                report,
+                None,
+            )
+
+        self.assertEqual([item["name"] for item in payload["message"]["attachments"]], ["inventory.xlsx", "guide.pdf"])
+
     def test_loads_and_normalizes_inline_logo_configuration(self):
         logo_data = f"data:image/png;base64,{base64.b64encode(b'logo').decode('ascii')}"
         config = load_email_config(

@@ -19,6 +19,7 @@ SIMPLE_ATTACHMENT_LIMIT = 3 * 1024 * 1024
 MAX_ATTACHMENT_SIZE = 150 * 1024 * 1024
 MAX_INLINE_LOGO_SIZE = 24 * 1024
 MAX_SHAREPOINT_LOGO_SIZE = 10 * 1024 * 1024
+MAX_SHAREPOINT_PDF_SIZE = 10 * 1024 * 1024
 DIRECT_SEND_PAYLOAD_LIMIT = 3 * 1024 * 1024
 INLINE_LOGO_CONTENT_ID = "cajas-logo"
 
@@ -77,6 +78,20 @@ def _clean_sharepoint_logo(value: object) -> dict | None:
     }
 
 
+def _clean_sharepoint_pdf(value: object) -> dict | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, dict):
+        raise EmailConfigError("La referencia del PDF en SharePoint no es válida.")
+    drive_id, item_id, name, content_type = (value.get(key) for key in ("driveId", "itemId", "name", "contentType"))
+    if not all(isinstance(item, str) and item.strip() for item in (drive_id, item_id, name, content_type)) or content_type.strip().lower() != "application/pdf":
+        raise EmailConfigError("La referencia del PDF en SharePoint está incompleta.")
+    name = name.strip()
+    if not re.fullmatch(r"cajas-email-attachment-[0-9a-f-]{36}\.pdf", name, re.IGNORECASE):
+        raise EmailConfigError("El nombre del PDF no es válido.")
+    return {"driveId": drive_id.strip(), "itemId": item_id.strip(), "name": name, "contentType": "application/pdf"}
+
+
 def _clean_recipients(value: object, field: str) -> list[str]:
     if not isinstance(value, list):
         raise EmailConfigError(f"El campo {field} debe ser una lista de correos.")
@@ -116,6 +131,7 @@ def load_email_config(raw_config: str | None) -> dict | None:
     logo_data, _logo_bytes, logo_content_type = _parse_inline_logo(value.get("logoData", ""))
     logo_name = value.get("logoName", "")
     logo_sharepoint = _clean_sharepoint_logo(value.get("logoSharePoint"))
+    pdf_sharepoint = _clean_sharepoint_pdf(value.get("pdfSharePoint"))
     if not isinstance(subject, str) or not subject.strip() or len(subject.strip()) > 200:
         raise EmailConfigError("El asunto es obligatorio y debe tener hasta 200 caracteres.")
     if not isinstance(body_html, str) or not body_html.strip() or len(body_html) > 100_000:
@@ -156,6 +172,7 @@ def load_email_config(raw_config: str | None) -> dict | None:
         "logoName": logo_name,
         "logoContentType": logo_content_type,
         "logoSharePoint": logo_sharepoint,
+        "pdfSharePoint": pdf_sharepoint,
     }
 
 
@@ -258,6 +275,8 @@ def build_direct_send_payload(
         if inline_logo:
             attachments.append(inline_logo)
     attachments.append(build_file_attachment(attachment_path))
+    if config.get("pdfSharePointPath"):
+        attachments.append(build_file_attachment(config["pdfSharePointPath"], content_type="application/pdf"))
     message["attachments"] = attachments
     payload = {"message": message, "saveToSentItems": True}
     payload_size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
@@ -308,6 +327,34 @@ def _download_sharepoint_logo(token: str, config: dict) -> Path | None:
         close_response = getattr(response, "close", None)
         if callable(close_response):
             close_response()
+    return temporary_path
+
+
+def _download_sharepoint_pdf(token: str, config: dict) -> Path | None:
+    pdf = config.get("pdfSharePoint")
+    if not pdf:
+        return None
+    response = requests.get(
+        f"{GRAPH_URL}/drives/{quote(str(pdf['driveId']), safe='')}/items/{quote(str(pdf['itemId']), safe='')}/content",
+        headers=graph_headers(token), timeout=120, stream=True,
+    )
+    _raise_for_graph(response, "descargar el PDF desde SharePoint")
+    temporary = tempfile.NamedTemporaryFile(prefix="cajas-email-", suffix=".pdf", delete=False)
+    temporary_path = Path(temporary.name)
+    total = 0
+    try:
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk: continue
+            total += len(chunk)
+            if total > MAX_SHAREPOINT_PDF_SIZE: raise EmailConfigError("El PDF debe pesar como máximo 10 MB.")
+            temporary.write(chunk)
+        if not total: raise EmailConfigError("El PDF de SharePoint está vacío.")
+    except Exception:
+        temporary.close(); temporary_path.unlink(missing_ok=True); raise
+    else:
+        temporary.close()
+        close_response = getattr(response, "close", None)
+        if callable(close_response): close_response()
     return temporary_path
 
 
@@ -473,9 +520,10 @@ def send_report_email(
     graph_access_token = token or graph_token()
     clean_sender = sender.strip()
     sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
+    sharepoint_pdf_path = _download_sharepoint_pdf(graph_access_token, config)
     try:
         for recipient in config["recipients"]:
-            recipient_config = {**config, "recipients": [recipient]}
+            recipient_config = {**config, "recipients": [recipient], "pdfSharePointPath": sharepoint_pdf_path}
             payload = build_direct_send_payload(recipient_config, attachment_path, sharepoint_logo_path)
             response = requests.post(
                 _user_path(clean_sender, "sendMail"),
@@ -488,3 +536,5 @@ def send_report_email(
     finally:
         if sharepoint_logo_path:
             sharepoint_logo_path.unlink(missing_ok=True)
+        if sharepoint_pdf_path:
+            sharepoint_pdf_path.unlink(missing_ok=True)
