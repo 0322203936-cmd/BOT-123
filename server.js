@@ -438,7 +438,7 @@ async function uploadCajasPdf(buffer, contentType) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) {
     const error = new Error('Selecciona un PDF válido.'); error.status = 400; throw error;
   }
-  if (contentType !== 'application/pdf') {
+  if (contentType !== 'application/pdf' || buffer.subarray(0, 5).toString() !== '%PDF-') {
     const error = new Error('El archivo debe ser PDF.'); error.status = 415; throw error;
   }
   if (buffer.length > maxCajasPdfBytes) {

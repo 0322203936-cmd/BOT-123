@@ -334,7 +334,7 @@ export class App implements OnInit, OnDestroy {
       const pdfFile = this.emailPdfFile;
       let pdfReference = this.emailPdfReference;
       if (pdfFile) {
-        const uploadResponse = await firstValueFrom(this.http.post<{ pdfSharePoint: CajasLogoReference }>('/api/workflows/cajas/email-pdf', pdfFile, { headers: { ...this.authHeaders(), 'Content-Type': pdfFile.type } }));
+        const uploadResponse = await firstValueFrom(this.http.post<{ pdfSharePoint: CajasLogoReference }>('/api/workflows/cajas/email-pdf', pdfFile, { headers: { ...this.authHeaders(), 'Content-Type': 'application/pdf' } }));
         pdfReference = uploadResponse.pdfSharePoint;
         uploadedPdfReference = pdfReference;
       }
@@ -429,7 +429,7 @@ export class App implements OnInit, OnDestroy {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
-    if (file.type !== 'application/pdf') { input.value = ''; this.error.set('El archivo debe ser PDF.'); return; }
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) { input.value = ''; this.error.set('El archivo debe ser PDF.'); return; }
     if (file.size > MAX_EMAIL_PDF_BYTES) { input.value = ''; this.error.set('El PDF debe pesar como máximo 10 MB.'); return; }
     this.emailPdfFile = file; this.emailPdfName = file.name; this.emailPdfReference = null; this.emailPdfCleared = false; this.error.set('');
   }
