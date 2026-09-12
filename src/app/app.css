@@ -222,21 +222,21 @@
   z-index: 10;
   inset: 0;
   display: grid;
-  place-items: center;
-  padding: 22px;
+  place-items: start center;
+  padding: 10px 22px 22px;
   background: rgba(23, 33, 29, .46);
 }
 .email-panel {
   width: min(850px, 100%);
   max-height: min(92vh, 820px);
   overflow: auto;
-  padding: 28px;
+  padding: 18px 28px 28px;
   background: #fff;
   border: 1px solid #dce5e0;
   border-radius: 14px;
   box-shadow: 0 24px 70px rgba(18, 39, 30, .25);
 }
-.panel-heading { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.panel-heading { display: flex; justify-content: flex-end; gap: 18px; margin-bottom: 10px; }
 .eyebrow { margin: 0 0 7px; color: #256d80; font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
 .panel-heading h2 { margin: 0; color: #17211d; font-size: 25px; }
 .panel-help, .panel-note { margin: 8px 0 0; color: #6c7972; font-size: 12px; line-height: 1.5; }

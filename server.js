@@ -183,6 +183,10 @@ app.use(
   '/api/workflows/cajas/email-logo',
   express.raw({ type: [...inlineLogoTypes], limit: `${maxSharePointLogoBytes}b` }),
 );
+app.use(
+  '/api/workflows/cajas/email-pdf',
+  express.raw({ type: 'application/pdf', limit: `${maxCajasPdfBytes}b` }),
+);
 app.use('/api/workflows/cajas/email-config', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '10kb' }));
 
