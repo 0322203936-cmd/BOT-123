@@ -129,6 +129,19 @@ describe('App', () => {
     expect(app.emailLogoData).toBe('');
   });
 
+  it('should accept a PDF when the browser omits its MIME type', () => {
+    const fixture = TestBed.createComponent(App);
+    const app = fixture.componentInstance as any;
+    const input = document.createElement('input');
+    const file = new File(['%PDF-1.7'], 'HOW TO PLACE YOUR ORDER.pdf', { type: '' });
+    Object.defineProperty(input, 'files', { value: [file] });
+
+    app.onPdfSelected({ target: input });
+
+    expect(app.emailPdfFile).toBe(file);
+    expect(app.emailPdfName).toBe('HOW TO PLACE YOUR ORDER.pdf');
+  });
+
   it('should preserve a legacy logo URL when saving without a new logo', async () => {
     const fixture = TestBed.createComponent(App);
     const http = TestBed.inject(HttpTestingController);
