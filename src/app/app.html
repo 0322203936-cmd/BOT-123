@@ -162,6 +162,14 @@
                 </label>
               </div>
               <div class="logo-upload">
+                <label for="emailPdfFile">PDF adicional</label>
+                <input id="emailPdfFile" name="emailPdfFile" type="file" accept="application/pdf" (change)="onPdfSelected($event)" />
+                <p class="field-help">Selecciona un PDF de máximo 10 MB. Se enviará junto con el Excel.</p>
+                @if (emailPdfName) {
+                  <div class="logo-file-row"><span>{{ emailPdfName }}</span><button class="remove-logo-button" type="button" (click)="clearPdf()">Quitar PDF</button></div>
+                }
+              </div>
+              <div class="logo-upload">
                 <label for="emailLogoFile">Logo del correo</label>
                 <input
                   id="emailLogoFile"

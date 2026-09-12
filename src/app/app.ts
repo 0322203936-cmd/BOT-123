@@ -42,6 +42,7 @@ interface CajasEmailConfig {
   logoName: string;
   logoContentType: string;
   logoSharePoint: CajasLogoReference | null;
+  pdfSharePoint: CajasLogoReference | null;
 }
 
 interface CajasLogoReference {
@@ -67,10 +68,12 @@ const defaultCajasEmailConfig: CajasEmailConfig = {
   logoName: '',
   logoContentType: '',
   logoSharePoint: null,
+  pdfSharePoint: null,
 };
 
 const MAX_EMAIL_LOGO_BYTES = 10 * 1024 * 1024;
 const EMAIL_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
+const MAX_EMAIL_PDF_BYTES = 10 * 1024 * 1024;
 
 @Component({
   selector: 'app-root',
@@ -124,6 +127,10 @@ export class App implements OnInit, OnDestroy {
   protected emailLogoFile: File | null = null;
   protected emailLogoReference: CajasLogoReference | null = null;
   protected emailLogoCleared = false;
+  protected emailPdfFile: File | null = null;
+  protected emailPdfName = '';
+  protected emailPdfReference: CajasLogoReference | null = null;
+  protected emailPdfCleared = false;
   protected password = '';
 
   private refreshTimer?: ReturnType<typeof setInterval>;
@@ -307,6 +314,7 @@ export class App implements OnInit, OnDestroy {
     this.emailSaving.set(true);
     this.error.set('');
     let uploadedLogoReference: CajasLogoReference | null = null;
+    let uploadedPdfReference: CajasLogoReference | null = null;
     try {
       const logoFile = this.emailLogoFile;
       let logoReference = this.emailLogoReference;
@@ -322,6 +330,13 @@ export class App implements OnInit, OnDestroy {
         );
         logoReference = uploadResponse.logoSharePoint;
         uploadedLogoReference = logoReference;
+      }
+      const pdfFile = this.emailPdfFile;
+      let pdfReference = this.emailPdfReference;
+      if (pdfFile) {
+        const uploadResponse = await firstValueFrom(this.http.post<{ pdfSharePoint: CajasLogoReference }>('/api/workflows/cajas/email-pdf', pdfFile, { headers: { ...this.authHeaders(), 'Content-Type': pdfFile.type } }));
+        pdfReference = uploadResponse.pdfSharePoint;
+        uploadedPdfReference = pdfReference;
       }
       const hasNewLogo = Boolean(logoFile || logoReference);
       const clearLogo = this.emailLogoCleared && !logoFile;
@@ -339,6 +354,7 @@ export class App implements OnInit, OnDestroy {
             logoContentType: this.emailLogoContentType,
             logoSharePoint: clearLogo ? null : logoReference,
             logoUrl: hasNewLogo || clearLogo ? '' : this.emailLegacyLogoUrl,
+            pdfSharePoint: this.emailPdfCleared && !pdfFile ? null : pdfReference,
           },
           { headers: this.authHeaders() },
         ),
@@ -359,6 +375,9 @@ export class App implements OnInit, OnDestroy {
         } catch {
           // La limpieza es preventiva; conserva el error original para el usuario.
         }
+      }
+      if (uploadedPdfReference) {
+        try { await firstValueFrom(this.http.delete('/api/workflows/cajas/email-pdf', { headers: this.authHeaders(), body: uploadedPdfReference })); } catch { }
       }
       this.error.set(this.getErrorMessage(error));
     } finally {
@@ -406,6 +425,17 @@ export class App implements OnInit, OnDestroy {
     this.emailLogoCleared = true;
   }
 
+  protected onPdfSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') { input.value = ''; this.error.set('El archivo debe ser PDF.'); return; }
+    if (file.size > MAX_EMAIL_PDF_BYTES) { input.value = ''; this.error.set('El PDF debe pesar como máximo 10 MB.'); return; }
+    this.emailPdfFile = file; this.emailPdfName = file.name; this.emailPdfReference = null; this.emailPdfCleared = false; this.error.set('');
+  }
+
+  protected clearPdf(): void { this.emailPdfFile = null; this.emailPdfName = ''; this.emailPdfReference = null; this.emailPdfCleared = true; }
+
   private revokeLogoPreview(): void {
     if (this.emailLogoPreview.startsWith('blob:')) URL.revokeObjectURL(this.emailLogoPreview);
   }
@@ -439,6 +469,10 @@ export class App implements OnInit, OnDestroy {
     this.emailLogoName = value.logoSharePoint?.name || value.logoName || (this.emailLegacyLogoUrl ? 'Logo guardado anteriormente' : '');
     this.emailLogoContentType = value.logoSharePoint?.contentType || value.logoContentType;
     this.emailLogoPreview = value.logoData || this.emailLegacyLogoUrl;
+    this.emailPdfFile = null;
+    this.emailPdfReference = value.pdfSharePoint;
+    this.emailPdfName = value.pdfSharePoint?.name || '';
+    this.emailPdfCleared = false;
   }
 
   private parseEmailList(value: string): string[] {
