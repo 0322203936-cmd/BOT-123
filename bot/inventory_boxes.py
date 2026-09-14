@@ -19,6 +19,7 @@ from email_sender import load_email_config, send_report_email
 from inventory_box_transform import (
     create_single_sheet_workbook,
     refresh_workbook_with_komet_inventory,
+    transform_inventory_workbook,
 )
 
 
@@ -500,6 +501,32 @@ def current_local_date() -> date:
         raise RuntimeError(f"La zona horaria configurada no existe: {timezone_name}.") from exc
 
 
+def prepare_workbook_with_inventory_and_dates(
+    source_path: Path,
+    komet_inventory_path: Path,
+    destination: Path,
+    *,
+    assumed_today: date,
+):
+    """Refresh Inventory first, then apply the Availability date rules."""
+    inventory_stage = destination.with_name(f"{destination.stem}-inventory.xlsx")
+    try:
+        inventory_result = refresh_workbook_with_komet_inventory(
+            source_path,
+            komet_inventory_path,
+            inventory_stage,
+            assumed_today=assumed_today,
+        )
+        date_result = transform_inventory_workbook(
+            inventory_stage,
+            destination,
+            assumed_today=assumed_today,
+        )
+        return inventory_result, date_result
+    finally:
+        inventory_stage.unlink(missing_ok=True)
+
+
 def download_and_prepare_source(komet_inventory_path: Path) -> tuple[str, dict, Path]:
     token = graph_token()
     item = resolve_sharepoint_item_by_url(token, SHAREPOINT_BOXES_URL)
@@ -508,7 +535,7 @@ def download_and_prepare_source(komet_inventory_path: Path) -> tuple[str, dict, 
     run_date = current_local_date()
     destination = REPORTS_DIR / f"inventory-upload-boxes-{run_date.isoformat()}.xlsx"
 
-    result = refresh_workbook_with_komet_inventory(
+    inventory_result, date_result = prepare_workbook_with_inventory_and_dates(
         source_path,
         komet_inventory_path,
         destination,
@@ -516,11 +543,14 @@ def download_and_prepare_source(komet_inventory_path: Path) -> tuple[str, dict, 
     )
     print(
         f"XLS preparado desde SharePoint: {destination} | "
-        f"hoy={run_date.isoformat()} filas_inventory={result.inventory_rows} "
-        f"filas_availability={result.availability_rows} "
-        f"filas_reducidas={result.decreased_rows} "
-        f"total_antes={result.before_total:g} total_despues={result.after_total:g} "
-        f"formulas_reemplazadas={result.formula_cells_replaced}",
+        f"hoy={run_date.isoformat()} filas_inventory={inventory_result.inventory_rows} "
+        f"filas_availability={inventory_result.availability_rows} "
+        f"filas_reducidas={inventory_result.decreased_rows} "
+        f"total_antes={inventory_result.before_total:g} total_despues={inventory_result.after_total:g} "
+        f"formulas_reemplazadas={inventory_result.formula_cells_replaced} "
+        f"filas_eliminadas={date_result.removed_rows} filas_agregadas={date_result.added_rows} "
+        f"domingos_finales={date_result.final_sunday_rows} "
+        f"fechas_inmediatas_finales={date_result.final_immediate_rows}",
         flush=True,
     )
     return token, item, destination

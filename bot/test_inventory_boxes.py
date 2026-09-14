@@ -124,6 +124,30 @@ class InventoryBoxesTests(unittest.TestCase):
             finally:
                 result.close()
 
+    @patch("inventory_boxes.transform_inventory_workbook")
+    @patch("inventory_boxes.refresh_workbook_with_komet_inventory")
+    def test_applies_date_rules_after_refreshing_inventory(self, refresh_workbook, transform_workbook):
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            komet_inventory = Path(temp_dir) / "komet-inventory.xls"
+            destination = Path(temp_dir) / "final.xlsx"
+            refresh_workbook.return_value = MagicMock()
+            transform_workbook.return_value = MagicMock()
+
+            inventory_boxes.prepare_workbook_with_inventory_and_dates(
+                source,
+                komet_inventory,
+                destination,
+                assumed_today=date(2026, 9, 14),
+            )
+
+            refresh_workbook.assert_called_once()
+            transform_workbook.assert_called_once()
+            self.assertLess(
+                refresh_workbook.call_args.args[2].name,
+                transform_workbook.call_args.args[1].name,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
