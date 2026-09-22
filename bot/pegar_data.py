@@ -25,7 +25,15 @@ def capture(page, name: str) -> None:
     """Guarda evidencia visual de cada paso para GitHub Actions."""
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
     destination = CAPTURES_DIR / name
-    page.screenshot(path=str(destination), full_page=True)
+    try:
+        page.screenshot(path=str(destination), full_page=False, timeout=10_000)
+    except PlaywrightTimeoutError:
+        print(
+            f"Aviso: no se pudo guardar la captura {destination}; "
+            "el proceso continuará.",
+            flush=True,
+        )
+        return
     print(f"Captura guardada: {destination}")
 
 
