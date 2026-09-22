@@ -297,6 +297,22 @@ class InventoryBoxTransformTests(unittest.TestCase):
             self.assertEqual(result.before_total, 15)
             self.assertEqual(result.after_total, 8)
 
+            preserved_output = Path(temp_dir) / "output-without-komet-export.xlsx"
+            preserved_result = refresh_workbook_with_komet_inventory(
+                source,
+                None,
+                preserved_output,
+                assumed_today=self.assumed_today,
+            )
+            preserved = load_workbook(preserved_output, data_only=False)
+            try:
+                self.assertEqual([preserved["Availability"][f"G{row}"].value for row in (2, 3, 4)], [8, 0, 4])
+                self.assertEqual(preserved["Inventory"]["I9"].value, 8)
+                self.assertEqual(preserved["Inventory"].tables["tblInventory"].ref, "A8:I10")
+            finally:
+                preserved.close()
+            self.assertEqual(preserved_result.inventory_rows, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

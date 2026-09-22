@@ -154,30 +154,58 @@ def open_boxes(page: Page) -> None:
     capture(page, "01_cajas.png")
 
 
-def download_inventory_export(page: Page, destination: Path) -> None:
+def download_inventory_export(page: Page, destination: Path) -> bool:
     """Download the current Komet inventory before deleting or uploading boxes."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     print("Descargando inventario actual de Kometsales...", flush=True)
-    click_first_visible(
-        page,
-        [
-            page.get_by_role("button", name=re.compile(r"acciones", re.I)),
-            page.get_by_text(re.compile(r"^\s*acciones\s*$", re.I)),
-        ],
-        "Acciones",
-    )
+    if inventory_is_empty(page):
+        print(
+            "Komet no tiene cajas para exportar; se omitirá la descarga del inventario.",
+            flush=True,
+        )
+        return False
+    try:
+        click_first_visible(
+            page,
+            [
+                page.get_by_role("button", name=re.compile(r"acciones", re.I)),
+                page.get_by_text(re.compile(r"^\s*acciones\s*$", re.I)),
+            ],
+            "Acciones",
+        )
+    except RuntimeError:
+        if inventory_is_empty(page):
+            print(
+                "Komet no tiene cajas para exportar; se omitirá la descarga del inventario.",
+                flush=True,
+            )
+            return False
+        raise
     with page.expect_download(timeout=60_000) as download_info:
         click_text(page, "Exportar a Excel", "Exportar inventario a Excel")
     download_info.value.save_as(str(destination))
     print(f"Inventario de Kometsales descargado: {destination}", flush=True)
+    return True
 
 
 def inventory_is_empty(page: Page) -> bool:
     no_records = page.locator("#tdLabelNoRecords")
     if visible_locator(no_records) is not None:
         return True
-    empty_message = page.get_by_text(re.compile(r"Parece que no podemos encontrar ningún registro", re.I))
-    return visible_locator(empty_message) is not None
+    empty_message = page.get_by_text(
+        re.compile(
+            r"Parece que no podemos encontrar ningún registro|"
+            r"no se encontraron? registros?|no hay registros?|"
+            r"no existen registros?|sin resultados?|no records?|no data",
+            re.I,
+        )
+    )
+    if visible_locator(empty_message) is not None:
+        return True
+    actions = page.locator("#inventoryPricingActions:visible")
+    awb = awb_checkbox(page)
+    rows = inventory_row_checkboxes(page)
+    return actions.count() == 0 and awb is None and rows is None
 
 
 def inventory_processing_visible(page: Page) -> bool:
@@ -503,7 +531,7 @@ def current_local_date() -> date:
 
 def prepare_workbook_with_inventory_and_dates(
     source_path: Path,
-    komet_inventory_path: Path,
+    komet_inventory_path: Path | None,
     destination: Path,
     *,
     assumed_today: date,
@@ -527,7 +555,7 @@ def prepare_workbook_with_inventory_and_dates(
         inventory_stage.unlink(missing_ok=True)
 
 
-def download_and_prepare_source(komet_inventory_path: Path) -> tuple[str, dict, Path]:
+def download_and_prepare_source(komet_inventory_path: Path | None) -> tuple[str, dict, Path]:
     token = graph_token()
     item = resolve_sharepoint_item_by_url(token, SHAREPOINT_BOXES_URL)
     source_path = download_sharepoint_file(token, item, SOURCE_FILENAME)
@@ -572,7 +600,9 @@ def run() -> None:
                 login_kometsales(page, komet_user, komet_password)
                 capture(page, "00_sesion_iniciada.png")
                 open_boxes(page)
-                download_inventory_export(page, komet_inventory_path)
+                inventory_downloaded = download_inventory_export(page, komet_inventory_path)
+                if not inventory_downloaded:
+                    komet_inventory_path = None
                 sharepoint_token, sharepoint_item, source_path = download_and_prepare_source(komet_inventory_path)
                 upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
                 print(
