@@ -54,8 +54,9 @@ class InventoryBoxesTests(unittest.TestCase):
         self.assertIn("path: artifacts/inventory_boxes/komet-inventory.xls", workflow)
         self.assertIn("retention-days: 7", workflow)
 
+    @patch("inventory_boxes.inventory_is_empty", return_value=False)
     @patch("inventory_boxes.click_text")
-    def test_downloads_inventory_export_from_actions_menu(self, click_text):
+    def test_downloads_inventory_export_from_actions_menu(self, click_text, inventory_empty):
         download = MagicMock()
         download_info = MagicMock(value=download)
         page = MagicMock()
@@ -66,6 +67,16 @@ class InventoryBoxesTests(unittest.TestCase):
 
         click_text.assert_called_once_with(page, "Exportar a Excel", "Exportar inventario a Excel")
         download.save_as.assert_called_once_with(str(destination))
+
+    @patch("inventory_boxes.inventory_is_empty", return_value=True)
+    def test_skips_export_when_komet_inventory_is_empty(self, inventory_empty):
+        page = MagicMock()
+        destination = Path("artifacts/inventory_boxes/komet-inventory.xls")
+
+        downloaded = inventory_boxes.download_inventory_export(page, destination)
+
+        self.assertFalse(downloaded)
+        page.expect_download.assert_not_called()
 
     @patch("inventory_boxes.awb_checkbox")
     @patch("inventory_boxes.inventory_is_empty", return_value=False)

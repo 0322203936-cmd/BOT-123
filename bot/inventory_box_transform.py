@@ -566,7 +566,7 @@ def _availability_current_quantity(
 
 def refresh_workbook_with_komet_inventory(
     source_path: Path,
-    komet_inventory_path: Path,
+    komet_inventory_path: Path | None,
     output_path: Path,
     *,
     assumed_today: date,
@@ -587,22 +587,29 @@ def refresh_workbook_with_komet_inventory(
 
         old_inventory_book = workbook
         old_inventory_rows, _, _ = _inventory_rows(old_inventory_book, "Inventory", table_name="tblInventory")
-        if komet_inventory_path.suffix.lower() == ".xls":
-            new_inventory_rows, _, _ = _inventory_rows_from_xls(komet_inventory_path)
-        else:
-            komet_book = load_workbook(komet_inventory_path, data_only=False, keep_links=True)
-            try:
-                source_sheet_name = komet_book.sheetnames[0]
-                new_inventory_rows, _, _ = _inventory_rows(komet_book, source_sheet_name)
-            finally:
-                komet_book.close()
 
         old_inventory_totals = _aggregate_inventory(old_inventory_rows, assumed_today, use_awb_date=True)
-        new_inventory_totals = _aggregate_inventory(new_inventory_rows, assumed_today)
-        _, new_inventory_rows = _write_inventory_rows_from_rows(
-            workbook,
-            new_inventory_rows,
-        )
+        if komet_inventory_path is None:
+            # Komet puede estar vacío y no ofrecer el menú de exportación.
+            # En ese caso se conserva Inventory y se usa como referencia para
+            # actualizar Availability, sin reemplazarla por un archivo vacío.
+            new_inventory_rows = old_inventory_rows
+            new_inventory_totals = old_inventory_totals
+        else:
+            if komet_inventory_path.suffix.lower() == ".xls":
+                new_inventory_rows, _, _ = _inventory_rows_from_xls(komet_inventory_path)
+            else:
+                komet_book = load_workbook(komet_inventory_path, data_only=False, keep_links=True)
+                try:
+                    source_sheet_name = komet_book.sheetnames[0]
+                    new_inventory_rows, _, _ = _inventory_rows(komet_book, source_sheet_name)
+                finally:
+                    komet_book.close()
+            new_inventory_totals = _aggregate_inventory(new_inventory_rows, assumed_today)
+            _, new_inventory_rows = _write_inventory_rows_from_rows(
+                workbook,
+                new_inventory_rows,
+            )
 
         before_total = 0.0
         after_total = 0.0
