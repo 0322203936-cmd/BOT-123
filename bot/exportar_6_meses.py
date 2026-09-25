@@ -236,7 +236,7 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_5_MESES_OK inicio_posco_sin_cambios=true "
+                f"EXPORTAR_6_MESES_OK inicio_posco_sin_cambios=true "
                 f"hoy={today.isoformat()} load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
