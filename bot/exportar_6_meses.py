@@ -224,7 +224,7 @@ def run() -> None:
                 page.wait_for_load_state("networkidle", timeout=60_000)
             except PlaywrightTimeoutError:
                 print("Aviso: POSCO sigue cargando resultados; se continuará con el filtro ACTIVO.", flush=True)
-            page.wait_for_timeout(3_000)
+            page.wait_for_timeout(120_000)
             capture(page, "06_busqueda_rango_completada.png")
 
             print("Cambiando estado a ACTIVO después de buscar el rango...", flush=True)
