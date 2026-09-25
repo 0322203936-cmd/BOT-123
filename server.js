@@ -46,8 +46,8 @@ const workflows = {
     repo: process.env.EXPORTAR_6_MESES_GITHUB_REPO || process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
     branch,
     file: 'exportar-6-meses.yml',
-    name: 'Exportar 5 Meses',
-    description: 'Extiende Load Date Mayor cinco meses, filtra estado ACTIVO y descarga Color filtro desde POSCO.',
+    name: 'Exportar 4 Meses',
+    description: 'Extiende Load Date Mayor cuatro meses, filtra estado ACTIVO y descarga Color filtro desde POSCO.',
     schedule: 'Ejecución manual',
   },
   inventario: {
