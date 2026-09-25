@@ -126,10 +126,10 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_mayor_four_months(page: Page) -> tuple[date, date]:
-    """Keep Load Date Menor as POSCO set it; extend only Mayor to today + 4 months."""
+def set_load_date_mayor_five_months(page: Page) -> tuple[date, date]:
+    """Keep Load Date Menor as POSCO set it; extend only Mayor to today + 5 months."""
     today = datetime.now(BOT_TIMEZONE).date()
-    end_date = add_calendar_months(today, 4)
+    end_date = add_calendar_months(today, 5)
     mayor = find_date_input(page, "Load Date Mayor")
     input_type = (mayor.get_attribute("type") or "text").lower()
     formatted = end_date.isoformat() if input_type == "date" else end_date.strftime("%m/%d/%Y")
@@ -137,7 +137,7 @@ def set_load_date_mayor_four_months(page: Page) -> tuple[date, date]:
     mayor.press("Tab")
     print(
         f"Load Date Menor se conserva; Load Date Mayor={end_date.isoformat()} "
-        f"(hoy {today.isoformat()} + 4 meses calendario).",
+        f"(hoy {today.isoformat()} + 5 meses calendario).",
         flush=True,
     )
     return today, end_date
@@ -216,9 +216,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cuatro meses...", flush=True)
-            today, end_date = set_load_date_mayor_four_months(page)
-            capture(page, "05_rango_hasta_cuatro_meses.png")
+            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cinco meses...", flush=True)
+            today, end_date = set_load_date_mayor_five_months(page)
+            capture(page, "05_rango_hasta_cinco_meses.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
@@ -236,7 +236,7 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_6_MESES_OK inicio_posco_sin_cambios=true "
+                f"EXPORTAR_5_MESES_OK inicio_posco_sin_cambios=true "
                 f"hoy={today.isoformat()} load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
