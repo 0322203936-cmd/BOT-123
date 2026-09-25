@@ -41,6 +41,15 @@ const workflows = {
     description: 'Descarga datos desde Posco y actualiza el archivo de SharePoint.',
     schedule: 'Ejecución manual',
   },
+  exportar6Meses: {
+    owner,
+    repo: process.env.EXPORTAR_6_MESES_GITHUB_REPO || process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'exportar-6-meses.yml',
+    name: 'Exportar 6 Meses',
+    description: 'Descarga desde POSCO el reporte Color filtro con el rango de fechas mostrado y estado ACTIVO.',
+    schedule: 'Ejecución manual',
+  },
   inventario: {
     owner,
     repo: process.env.PEGAR_DATA_GITHUB_REPO || 'BOT-123',
@@ -137,6 +146,9 @@ const reportMatchers = {
     (name) => /(^|\/)[^/]*\.xls$/i.test(name),
     (name) => /_actualizado\.xlsm$/i.test(name),
   ],
+  exportar6Meses: [
+    (name) => /(^|\/)[^/]*\.(?:xlsx?|xlsm)$/i.test(name),
+  ],
   inventario: [
     (name) => /(^|\/)[^/]*\.xlsx$/i.test(name),
   ],
@@ -161,6 +173,7 @@ const artifactNameMatchers = {
     (name) => name.startsWith('reportes-pegar-data-'),
     (name) => name.startsWith('capturas-pegar-data-'),
   ],
+  exportar6Meses: [(name) => name.startsWith('reporte-exportar-6-meses-')],
   inventario: [
     (name) => name.startsWith('reportes-inventario-'),
     (name) => name.startsWith('capturas-inventario-'),

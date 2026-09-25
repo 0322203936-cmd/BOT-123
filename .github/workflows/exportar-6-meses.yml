@@ -1,0 +1,55 @@
+name: Exportar 6 Meses
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: exportar-6-meses-posco
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  exportar-6-meses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Iniciar sesión y exportar reporte de POSCO
+        env:
+          POSCO_USER: ${{ secrets.POSCO_USER }}
+          POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
+        run: python -u bot/exportar_6_meses.py
+
+      - name: Guardar capturas de la ejecución
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-exportar-6-meses-${{ github.run_number }}
+          path: artifacts/exportar_6_meses/capturas/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar Excel descargado de POSCO
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-exportar-6-meses-${{ github.run_number }}
+          path: artifacts/exportar_6_meses/reportes/*
+          if-no-files-found: warn
+          retention-days: 7
