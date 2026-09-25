@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { EditorComponent } from '@tinymce/tinymce-angular';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
