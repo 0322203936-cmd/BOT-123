@@ -216,9 +216,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cinco meses...", flush=True)
+            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cuatro meses...", flush=True)
             today, end_date = set_load_date_mayor_four_months(page)
-            capture(page, "05_rango_hasta_cinco_meses.png")
+            capture(page, "05_rango_hasta_cuatro_meses.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
