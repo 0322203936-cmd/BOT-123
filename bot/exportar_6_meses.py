@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import calendar
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
@@ -11,6 +14,7 @@ POSCO_URL = "http://3.132.9.174/Posco/"
 ARTIFACTS_DIR = Path("artifacts/exportar_6_meses")
 CAPTURES_DIR = ARTIFACTS_DIR / "capturas"
 REPORTS_DIR = ARTIFACTS_DIR / "reportes"
+BOT_TIMEZONE = ZoneInfo("America/Tijuana")
 
 
 def required_secret(name: str) -> str:
@@ -100,11 +104,66 @@ def select_active_status(page: Page) -> None:
     raise RuntimeError("No se encontró el filtro de estado con las opciones Todos y ACTIVO.")
 
 
+def add_calendar_months(value: date, months: int) -> date:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def find_date_input(page: Page, label: str):
+    group_input = page.locator(f'.input-group:has-text("{label}") input')
+    if group_input.count() > 0:
+        return group_input.first
+
+    label_node = page.get_by_text(label, exact=True)
+    if label_node.count() > 0:
+        sibling_input = label_node.first.locator("xpath=..").locator("input")
+        if sibling_input.count() > 0:
+            return sibling_input.first
+
+    raise RuntimeError(f"No se encontró el campo {label}.")
+
+
+def set_load_date_mayor_four_months(page: Page) -> tuple[date, date]:
+    """Keep Load Date Menor as POSCO set it; extend only Mayor to today + 4 months."""
+    today = datetime.now(BOT_TIMEZONE).date()
+    end_date = add_calendar_months(today, 4)
+    mayor = find_date_input(page, "Load Date Mayor")
+    input_type = (mayor.get_attribute("type") or "text").lower()
+    formatted = end_date.isoformat() if input_type == "date" else end_date.strftime("%m/%d/%Y")
+    mayor.fill(formatted)
+    mayor.press("Tab")
+    print(
+        f"Load Date Menor se conserva; Load Date Mayor={end_date.isoformat()} "
+        f"(hoy {today.isoformat()} + 4 meses calendario).",
+        flush=True,
+    )
+    return today, end_date
+
+
+def click_search(page: Page) -> None:
+    candidates = [
+        page.locator('button:has-text("Buscar"), a:has-text("Buscar")'),
+        page.locator('[class*="btn"]:has-text("Buscar")'),
+        page.get_by_text("Buscar", exact=True),
+    ]
+    for candidate in candidates:
+        for index in range(candidate.count()):
+            element = candidate.nth(index)
+            if element.is_visible():
+                element.click(timeout=10_000)
+                print("Clic: Buscar", flush=True)
+                return
+    raise RuntimeError("No se encontró el botón Buscar en la página de Órdenes.")
+
+
 def export_color_filter(page: Page) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     click_visible_text(page, "Exportar")
     page.wait_for_timeout(500)
-    capture(page, "05_menu_exportar.png")
+    capture(page, "08_menu_exportar.png")
 
     with page.expect_download(timeout=60_000) as download_info:
         click_visible_text(page, "Exportar Color filtro")
@@ -155,17 +214,32 @@ def run() -> None:
                 if "list-orden-detalle" not in page.url:
                     raise RuntimeError(f"POSCO no abrió la lista de Órdenes. URL actual: {page.url}")
             page.wait_for_timeout(3_000)
-            capture(page, "04_ordenes_fechas_sin_cambios.png")
+            capture(page, "04_fechas_originales_posco.png")
 
-            print("Conservando el rango de fechas mostrado y cambiando estado a ACTIVO...", flush=True)
+            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cuatro meses...", flush=True)
+            today, end_date = set_load_date_mayor_four_months(page)
+            capture(page, "05_rango_hasta_cuatro_meses.png")
+            click_search(page)
+            try:
+                page.wait_for_load_state("networkidle", timeout=60_000)
+            except PlaywrightTimeoutError:
+                print("Aviso: POSCO sigue cargando resultados; se continuará con el filtro ACTIVO.", flush=True)
+            page.wait_for_timeout(3_000)
+            capture(page, "06_busqueda_rango_completada.png")
+
+            print("Cambiando estado a ACTIVO después de buscar el rango...", flush=True)
             select_active_status(page)
             page.wait_for_timeout(6_000)
-            capture(page, "06_ordenes_estado_activo.png")
+            capture(page, "07_ordenes_estado_activo.png")
 
             print("Exportando Exportar Color filtro...", flush=True)
             report = export_color_filter(page)
-            capture(page, "07_exportacion_completada.png")
-            print(f"EXPORTAR_6_MESES_OK reporte={report}", flush=True)
+            capture(page, "09_exportacion_completada.png")
+            print(
+                f"EXPORTAR_6_MESES_OK inicio_posco_sin_cambios=true "
+                f"hoy={today.isoformat()} load_date_mayor={end_date.isoformat()} reporte={report}",
+                flush=True,
+            )
         except Exception:
             capture(page, "99_error.png")
             raise
