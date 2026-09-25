@@ -47,7 +47,7 @@ const workflows = {
     branch,
     file: 'exportar-6-meses.yml',
     name: 'Exportar 6 Meses',
-    description: 'Extiende Load Date Mayor cuatro meses, filtra estado ACTIVO y descarga Color filtro desde POSCO.',
+    description: 'Extiende Load Date Mayor seis meses, filtra estado ACTIVO y descarga Color filtro desde POSCO.',
     schedule: 'Ejecución manual',
   },
   inventario: {
