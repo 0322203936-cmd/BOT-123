@@ -165,7 +165,11 @@ class InventoryBoxTransformTests(unittest.TestCase):
             workbook.save(source)
             workbook.close()
 
-            create_single_sheet_workbook(source, output)
+            create_single_sheet_workbook(
+                source,
+                output,
+                normalize_available_from_dates=True,
+            )
 
             result = load_workbook(output, data_only=False)
             try:
@@ -174,6 +178,28 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
                 self.assertEqual(result.active["B2"].value.date(), date(2026, 9, 14))
                 self.assertEqual(result.active["B2"].number_format, DATE_NUMBER_FORMAT)
+            finally:
+                result.close()
+
+    def test_default_single_sheet_copy_does_not_change_date_format(self) -> None:
+        self.assertIsNotNone(create_single_sheet_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "copy.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Availability"
+            sheet.append(["Product Description", "Available From"])
+            sheet.append(["A", date(2026, 9, 14)])
+            sheet["B2"].number_format = "mmm d, yyyy"
+            workbook.save(source)
+            workbook.close()
+
+            create_single_sheet_workbook(source, output)
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result["Availability"]["B2"].number_format, "mmm d, yyyy")
             finally:
                 result.close()
 

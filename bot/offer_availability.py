@@ -31,7 +31,12 @@ def prepare_availability_workbook() -> Path:
     item = resolve_sharepoint_item_by_url(token, sharepoint_url)
     source = download_sharepoint_file(token, item, SOURCE_FILENAME)
     destination = ARTIFACTS_DIR / UPLOAD_FILENAME
-    create_single_sheet_workbook(source, destination, sheet_name="Availability")
+    create_single_sheet_workbook(
+        source,
+        destination,
+        sheet_name="Availability",
+        normalize_available_from_dates=True,
+    )
     print(f"Archivo preparado con una sola hoja: {destination}", flush=True)
     return destination
 
