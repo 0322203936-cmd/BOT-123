@@ -766,11 +766,17 @@ def transform_inventory_workbook(
     return result
 
 
-def create_single_sheet_workbook(source_path: Path, output_path: Path) -> None:
-    """Save a copy containing only the Availability sheet for Kometsales."""
+def create_single_sheet_workbook(
+    source_path: Path,
+    output_path: Path,
+    sheet_name: str = KOMET_SHEET_NAME,
+) -> None:
+    """Save a copy containing only the requested sheet."""
     workbook = load_workbook(source_path, data_only=False, keep_links=True)
     try:
-        target_sheet = _komet_sheet(workbook)
+        if sheet_name not in workbook.sheetnames:
+            raise RuntimeError(f"El libro no contiene la pestaña requerida {sheet_name}.")
+        target_sheet = workbook[sheet_name]
         for worksheet in tuple(workbook.worksheets):
             if worksheet is not target_sheet:
                 workbook.remove(worksheet)
@@ -782,6 +788,8 @@ def create_single_sheet_workbook(source_path: Path, output_path: Path) -> None:
     verification = load_workbook(output_path, data_only=False, read_only=True)
     try:
         if verification.sheetnames != [target_sheet.title]:
-            raise RuntimeError("La copia para Kometsales no conserva únicamente la pestaña Availability.")
+            raise RuntimeError(
+                f"La copia no conserva únicamente la pestaña {sheet_name}."
+            )
     finally:
         verification.close()

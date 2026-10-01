@@ -171,6 +171,29 @@ class InventoryBoxTransformTests(unittest.TestCase):
             finally:
                 result.close()
 
+    def test_creates_an_email_copy_with_only_the_inventory_sheet(self) -> None:
+        self.assertIsNotNone(create_single_sheet_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "email.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "Customer View"
+            workbook.create_sheet("Availability")
+            inventory = workbook.create_sheet("Inventory")
+            inventory["A1"] = "Inventory only"
+            workbook.create_sheet("Order Form")
+            workbook.save(source)
+            workbook.close()
+
+            create_single_sheet_workbook(source, output, sheet_name="Inventory")
+
+            result = load_workbook(output, data_only=False, read_only=True)
+            try:
+                self.assertEqual(result.sheetnames, ["Inventory"])
+                self.assertEqual(result["Inventory"]["A1"].value, "Inventory only")
+            finally:
+                result.close()
+
     def test_keeps_the_second_sheet_in_the_full_transformed_workbook(self) -> None:
         self.assertIsNotNone(transform_inventory_workbook)
         with TemporaryDirectory() as temp_dir:

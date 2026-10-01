@@ -591,6 +591,8 @@ def run() -> None:
     sender = required_secret("MAIL_SENDER") if email_config else ""
     komet_inventory_path = ARTIFACTS_DIR / "komet-inventory.xls"
     komet_upload_path = ARTIFACTS_DIR / "komet-upload.xlsx"
+    email_attachment_path = ARTIFACTS_DIR / "inventory-email.xlsx"
+    email_attachment_ready = False
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
@@ -613,6 +615,13 @@ def run() -> None:
                 create_single_sheet_workbook(source_path, komet_upload_path)
                 delete_all_inventory(page)
                 upload_boxes(page, komet_upload_path)
+                if email_config:
+                    create_single_sheet_workbook(
+                        source_path,
+                        email_attachment_path,
+                        sheet_name="Inventory",
+                    )
+                    email_attachment_ready = True
                 print(f"Proceso completo. URL final: {page.url}", flush=True)
             except Exception:
                 capture(page, "99_error.png")
@@ -622,6 +631,8 @@ def run() -> None:
                 browser.close()
     finally:
         komet_upload_path.unlink(missing_ok=True)
+        if not email_attachment_ready:
+            email_attachment_path.unlink(missing_ok=True)
 
     if not email_config:
         print(
@@ -630,7 +641,10 @@ def run() -> None:
         )
         return
 
-    send_report_email(email_config, sender, source_path, token=sharepoint_token)
+    try:
+        send_report_email(email_config, sender, email_attachment_path, token=sharepoint_token)
+    finally:
+        email_attachment_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
