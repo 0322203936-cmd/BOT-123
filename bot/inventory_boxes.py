@@ -7,6 +7,7 @@ from pathlib import Path
 from time import monotonic
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from openpyxl import load_workbook
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from sharepoint_sync import (
@@ -40,6 +41,8 @@ SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
 INVENTORY_READY_WAIT_MS = 120_000
+UPLOAD_VERIFY_WAIT_MS = 180_000
+UPLOAD_VERIFY_POLL_MS = 5_000
 SELECTION_RETRY_ATTEMPTS = 3
 
 
@@ -289,6 +292,69 @@ def wait_for_inventory_ready(page: Page) -> None:
     )
 
 
+def workbook_has_positive_availability(workbook_path: Path) -> bool:
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        if "Availability" not in workbook.sheetnames:
+            raise RuntimeError("El archivo preparado no contiene la pestaña Availability.")
+        worksheet = workbook["Availability"]
+        quantity_column = None
+        header_row = None
+        for row in worksheet.iter_rows(min_row=1, max_row=min(20, worksheet.max_row)):
+            headers = {
+                str(cell.value or "").strip().casefold(): cell.column
+                for cell in row
+                if cell.value not in (None, "")
+            }
+            if "qty packages" in headers:
+                quantity_column = headers["qty packages"]
+                header_row = row[0].row
+                break
+        if quantity_column is None or header_row is None:
+            raise RuntimeError("El archivo preparado no contiene la columna Qty Packages.")
+        for row in worksheet.iter_rows(
+            min_row=header_row + 1,
+            min_col=quantity_column,
+            max_col=quantity_column,
+            values_only=True,
+        ):
+            value = row[0]
+            if isinstance(value, bool) or value in (None, ""):
+                continue
+            try:
+                if float(str(value).replace(",", "").strip()) > 0:
+                    return True
+            except ValueError:
+                continue
+        return False
+    finally:
+        workbook.close()
+
+
+def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
+    if not workbook_has_positive_availability(workbook_path):
+        print(
+            "Availability no contiene cantidades mayores que cero; se espera que Komet quede vacío.",
+            flush=True,
+        )
+        return
+
+    deadline = monotonic() + UPLOAD_VERIFY_WAIT_MS / 1_000
+    while monotonic() < deadline:
+        page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(1_500)
+        wait_for_network(page, timeout=30_000)
+        if not inventory_is_empty(page):
+            print("Komet confirmó que ya aparecen cajas después de procesar el XLS.", flush=True)
+            return
+        page.wait_for_timeout(UPLOAD_VERIFY_POLL_MS)
+
+    raise RuntimeError(
+        "Komet programó el XLS, pero no mostró cajas después de esperar el procesamiento. "
+        "No se marcará la carga como completada."
+    )
+
+
 def select_all_inventory(page: Page) -> None:
     for attempt in range(1, SELECTION_RETRY_ATTEMPTS + 1):
         checkbox = awb_checkbox(page)
@@ -513,10 +579,10 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
         if any(visible_locator(locator) is not None for locator in error_candidates):
             raise RuntimeError("Kometsales mostró un error después de intentar cargar el XLS.") from exc
         print(
-            "Aviso: Kometsales no mostró un mensaje final, pero tampoco mostró un error. "
-            "Se da por terminada la carga después de esperar la respuesta de la página.",
+            "Aviso: Kometsales no mostró el aviso de programación; se verificará la tabla de cajas.",
             flush=True,
         )
+    wait_for_uploaded_inventory(page, workbook_path)
     capture(page, "04_carga_completada.png")
     print("XLS de cajas cargado correctamente en Kometsales.", flush=True)
 
