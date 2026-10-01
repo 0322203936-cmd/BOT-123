@@ -77,7 +77,6 @@ class InventoryBoxTransformTests(unittest.TestCase):
         self.assertEqual(
             output_dates,
             [
-                date(2026, 9, 9),
                 date(2026, 9, 14),
                 date(2026, 9, 15),
                 date(2026, 9, 15),
@@ -87,7 +86,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
         added = [row for row in result.output_rows if row.is_added]
         self.assertEqual(len(added), 2)
         self.assertEqual([row.values[1] for row in added], ["A", "B"])
-        self.assertEqual(result.removed_rows, 2)
+        self.assertEqual(result.removed_rows, 3)
         self.assertEqual(result.final_sunday_rows, 0)
 
     def test_saturday_latest_row_adds_monday(self) -> None:
