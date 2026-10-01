@@ -770,6 +770,8 @@ def create_single_sheet_workbook(
     source_path: Path,
     output_path: Path,
     sheet_name: str = KOMET_SHEET_NAME,
+    *,
+    normalize_available_from_dates: bool = False,
 ) -> None:
     """Save a copy containing only the requested sheet."""
     workbook = load_workbook(source_path, data_only=False, keep_links=True)
@@ -777,7 +779,7 @@ def create_single_sheet_workbook(
         if sheet_name not in workbook.sheetnames:
             raise RuntimeError(f"El libro no contiene la pestaña requerida {sheet_name}.")
         target_sheet = workbook[sheet_name]
-        if sheet_name == KOMET_SHEET_NAME:
+        if sheet_name == KOMET_SHEET_NAME and normalize_available_from_dates:
             header_row, _, date_column = _header_columns(target_sheet)
             normalized_dates = 0
             for row in range(header_row + 1, target_sheet.max_row + 1):
@@ -811,7 +813,7 @@ def create_single_sheet_workbook(
             raise RuntimeError(
                 f"La copia no conserva únicamente la pestaña {sheet_name}."
             )
-        if sheet_name == KOMET_SHEET_NAME:
+        if sheet_name == KOMET_SHEET_NAME and normalize_available_from_dates:
             verified_sheet = verification[sheet_name]
             header_row, _, date_column = _header_columns(verified_sheet)
             formats = {
