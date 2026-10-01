@@ -199,7 +199,8 @@ def apply_inventory_rules(
         )
 
         if available is not None and (
-            available.weekday() == 6
+            available < assumed_today
+            or available.weekday() == 6
             or assumed_today <= available <= window_end
         ):
             removed_rows += 1
