@@ -11,6 +11,7 @@ from openpyxl.styles import Font, PatternFill
 
 try:
     from inventory_box_transform import (
+        DATE_NUMBER_FORMAT,
         apply_inventory_rules,
         create_single_sheet_workbook,
         transform_inventory_workbook,
@@ -19,6 +20,7 @@ try:
 except ImportError:
     try:
         from bot.inventory_box_transform import (
+            DATE_NUMBER_FORMAT,
             apply_inventory_rules,
             create_single_sheet_workbook,
             transform_inventory_workbook,
@@ -27,6 +29,7 @@ except ImportError:
     except ImportError:
         apply_inventory_rules = None
         create_single_sheet_workbook = None
+        DATE_NUMBER_FORMAT = None
         transform_inventory_workbook = None
         refresh_workbook_with_komet_inventory = None
 try:
@@ -158,6 +161,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Product Description", "Available From"])
             availability.append(["A", date(2026, 9, 14)])
             availability["A2"].font = Font(name="Arial", bold=True)
+            availability["B2"].number_format = "mmm d, yyyy"
             workbook.save(source)
             workbook.close()
 
@@ -168,6 +172,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.sheetnames, ["Availability"])
                 self.assertEqual(result.active["A2"].value, "A")
                 self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
+                self.assertEqual(result.active["B2"].value.date(), date(2026, 9, 14))
+                self.assertEqual(result.active["B2"].number_format, DATE_NUMBER_FORMAT)
             finally:
                 result.close()
 

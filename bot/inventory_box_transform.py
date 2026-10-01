@@ -777,6 +777,26 @@ def create_single_sheet_workbook(
         if sheet_name not in workbook.sheetnames:
             raise RuntimeError(f"El libro no contiene la pestaña requerida {sheet_name}.")
         target_sheet = workbook[sheet_name]
+        if sheet_name == KOMET_SHEET_NAME:
+            header_row, _, date_column = _header_columns(target_sheet)
+            normalized_dates = 0
+            for row in range(header_row + 1, target_sheet.max_row + 1):
+                cell = target_sheet.cell(row=row, column=date_column + 1)
+                if cell.value in (None, ""):
+                    continue
+                normalized_date = _as_date(cell.value, workbook.epoch)
+                if normalized_date is None:
+                    raise RuntimeError(
+                        f"Available From contiene una fecha inválida en la fila {row}: "
+                        f"{cell.value!r}."
+                    )
+                cell.value = normalized_date
+                cell.number_format = DATE_NUMBER_FORMAT
+                normalized_dates += 1
+            if normalized_dates == 0:
+                raise RuntimeError(
+                    "La hoja Availability no contiene fechas para enviar a Kometsales."
+                )
         for worksheet in tuple(workbook.worksheets):
             if worksheet is not target_sheet:
                 workbook.remove(worksheet)
@@ -791,5 +811,19 @@ def create_single_sheet_workbook(
             raise RuntimeError(
                 f"La copia no conserva únicamente la pestaña {sheet_name}."
             )
+        if sheet_name == KOMET_SHEET_NAME:
+            verified_sheet = verification[sheet_name]
+            header_row, _, date_column = _header_columns(verified_sheet)
+            formats = {
+                verified_sheet.cell(row=row, column=date_column + 1).number_format
+                for row in range(header_row + 1, verified_sheet.max_row + 1)
+                if verified_sheet.cell(row=row, column=date_column + 1).value
+                not in (None, "")
+            }
+            if formats != {DATE_NUMBER_FORMAT}:
+                raise RuntimeError(
+                    "La copia para Kometsales conserva formatos de fecha inesperados: "
+                    f"{sorted(formats)}"
+                )
     finally:
         verification.close()
