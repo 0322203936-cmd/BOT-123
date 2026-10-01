@@ -1,0 +1,65 @@
+name: Ofrecer Availability en Komet
+run-name: Ofrecer Availability ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Identificador generado por la app
+        required: true
+        type: string
+
+concurrency:
+  group: kometsales-offer-availability
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  offer-availability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Guardar cambios de Availability en Komet
+        env:
+          KOMET_USER: ${{ secrets.KOMET_USER }}
+          KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_OFFER_URL: ${{ secrets.SHAREPOINT_OFFER_URL }}
+        run: python -u bot/offer_availability.py
+
+      - name: Guardar capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-ofrecer-availability-${{ github.run_number }}
+          path: artifacts/inventory_boxes/capturas/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar Availability enviado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: availability-enviado-${{ github.run_number }}
+          path: artifacts/offer_availability/availability-only.xlsx
+          if-no-files-found: warn
+          retention-days: 7
