@@ -104,6 +104,15 @@ const workflows = {
     description: 'Vacía el inventario de Kometsales y sube el XLS actualizado desde SharePoint.',
     schedule: 'Ejecución manual',
   },
+  facturasKomet: {
+    owner,
+    repo: process.env.FACTURAS_KOMET_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'facturas-komet.yml',
+    name: 'Facturas Komet',
+    description: 'Prepara Factura, Pick Ticket y Etiquetas para cada orden reciente y guarda capturas sin enviar correos.',
+    schedule: 'Ejecución manual · modo prueba',
+  },
 };
 
 const lastDispatch = new Map();
@@ -164,6 +173,9 @@ const reportMatchers = {
   cajas: [
     (name) => /(^|\/)inventory-upload-boxes-.*\.xlsx$/i.test(name),
   ],
+  facturasKomet: [
+    (name) => /(^|\/)summary\.json$/i.test(name),
+  ],
 };
 
 const artifactNameMatchers = {
@@ -188,6 +200,7 @@ const artifactNameMatchers = {
     (name) => name === 'evidencias-posco-datareq',
   ],
   cajas: [(name) => name.startsWith('reportes-inventory-boxes-')],
+  facturasKomet: [(name) => name.startsWith('reportes-facturas-komet-')],
 };
 
 app.disable('x-powered-by');

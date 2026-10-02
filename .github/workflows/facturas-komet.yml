@@ -1,0 +1,58 @@
+name: Bot Facturas Komet - Prueba
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: kometsales-facturas-prueba
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  facturas-komet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Preparar documentos sin enviar correos
+        env:
+          KOMET_USER: ${{ secrets.KOMET_USER }}
+          KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
+          KOMET_INVOICE_EMAIL: ${{ secrets.KOMET_INVOICE_EMAIL }}
+          KOMET_EMAIL_MODE: cancel
+          KOMET_TIMEZONE: America/Tijuana
+        run: python -u bot/facturas_komet.py
+
+      - name: Guardar imágenes de evidencia
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-facturas-komet-${{ github.run_number }}
+          path: artifacts/facturas_komet/capturas/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar resumen de la prueba
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-facturas-komet-${{ github.run_number }}
+          path: artifacts/facturas_komet/summary.json
+          if-no-files-found: warn
+          retention-days: 7
