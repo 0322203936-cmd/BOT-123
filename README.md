@@ -34,9 +34,9 @@ El workflow está en `.github/workflows/inventory-boxes.yml` y requiere estos se
 
 El botón solicita `CONFIRMAR` antes de enviarlo a GitHub Actions porque el proceso elimina el inventario existente.
 
-## Bot Facturas Komet (modo prueba)
+## Bot Facturas Komet
 
-El botón **Facturas Komet** inicia sesión en Kometsales, selecciona **PACIFICA FARMS - CAL**, abre Ventas y busca órdenes desde la fecha actual hasta diez días después. Para cada orden prepara **Factura**, **Pick Ticket** y **Etiquetas** con el correo configurado, guarda capturas de cada paso y presiona **Cancelar**. En esta etapa no existe ningún clic de envío de correo.
+El botón **Facturas Komet** inicia sesión en Kometsales, selecciona **PACIFICA FARMS - CAL**, abre Ventas y busca órdenes desde la fecha actual hasta diez días después. Para cada orden prepara y envía **Factura**, **Pick Ticket** y **Etiquetas** a sus destinatarios configurados, guarda capturas de cada paso y registra la orden para evitar reenvíos.
 
 El workflow manual está en `.github/workflows/facturas-komet.yml` y requiere estos secretos en `BOT-123`:
 
@@ -48,11 +48,11 @@ El workflow manual está en `.github/workflows/facturas-komet.yml` y requiere es
 
 Los tres destinatarios se configuran por separado: `KOMET_INVOICE_EMAIL` para Factura, `KOMET_PICK_TICKET_EMAIL` para Pick Ticket y `KOMET_LABELS_EMAIL` para Etiquetas.
 
-Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 días. El workflow permanece manual para poder revisar las capturas antes de automatizar cualquier envío.
+Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 días. El workflow se activa manualmente por GitHub Actions o mediante el programador externo.
 
 Para programarlo sin depender del evento `schedule` de GitHub, el servidor expone `POST /api/cron/facturas-komet`. Un programador externo debe llamarlo cada 3 horas enviando el encabezado `X-Cron-Secret`; Render conserva el secreto y usa `GITHUB_TOKEN` para disparar el workflow manual. El servicio externo no debe recibir ni guardar el token de GitHub.
 
-Antes de activar envíos reales, el bot mantiene la bitácora `bot/data/facturas_enviadas.json`. La clave de cada registro combina el número y la fecha de la orden. Las órdenes omitidas por aparecer en esa bitácora no se procesan otra vez; las pruebas en modo `cancel` no agregan registros. El workflow sólo guarda cambios de esa bitácora cuando `KOMET_EMAIL_MODE` está en `send` y `KOMET_ALLOW_SEND` vale `YES`.
+El bot mantiene la bitácora `bot/data/facturas_enviadas.json`. La clave de cada registro combina el número y la fecha de la orden. Las órdenes omitidas por aparecer en esa bitácora no se procesan otra vez. El workflow guarda cambios de esa bitácora después de un envío exitoso cuando `KOMET_EMAIL_MODE` está en `send` y `KOMET_ALLOW_SEND` vale `YES`.
 
 ## Configuración local
 
