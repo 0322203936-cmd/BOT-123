@@ -295,16 +295,15 @@ def check_document_boxes(page: Page, dialog) -> None:
 
 def fill_email_dialog(page: Page) -> object:
     dialog = visible_dialog(page)
-    email = required_secret("KOMET_INVOICE_EMAIL")
-    field_ids = [
-        "#txtDialogOrderMailTo",
-        "#txtDialogPickTicketMailTo",
-        "#txtDialogLabelsMailTo",
+    recipients = [
+        ("#txtDialogOrderMailTo", "KOMET_INVOICE_EMAIL"),
+        ("#txtDialogPickTicketMailTo", "KOMET_PICK_TICKET_EMAIL"),
+        ("#txtDialogLabelsMailTo", "KOMET_LABELS_EMAIL"),
     ]
-    for selector in field_ids:
+    for selector, secret_name in recipients:
         field = page.locator(selector)
         field.wait_for(state="visible", timeout=20_000)
-        field.fill(email)
+        field.fill(required_secret(secret_name))
     check_document_boxes(page, dialog)
     return dialog
 
