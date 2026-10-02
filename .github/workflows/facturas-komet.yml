@@ -8,12 +8,15 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   facturas-komet:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      KOMET_EMAIL_MODE: cancel
+      KOMET_ALLOW_SEND: NO
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -35,9 +38,21 @@ jobs:
           KOMET_USER: ${{ secrets.KOMET_USER }}
           KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
           KOMET_INVOICE_EMAIL: ${{ secrets.KOMET_INVOICE_EMAIL }}
-          KOMET_EMAIL_MODE: cancel
           KOMET_TIMEZONE: America/Tijuana
         run: python -u bot/facturas_komet.py
+
+      - name: Guardar bitácora de facturas enviadas
+        if: ${{ success() && env.KOMET_EMAIL_MODE == 'send' }}
+        run: |
+          if [ -z "$(git status --porcelain -- bot/data/facturas_enviadas.json)" ]; then
+            echo "No hay nuevas facturas enviadas para registrar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bot/data/facturas_enviadas.json
+          git commit -m "Registrar facturas Komet enviadas [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Guardar imágenes de evidencia
         if: always()

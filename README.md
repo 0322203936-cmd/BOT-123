@@ -48,6 +48,8 @@ Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 
 
 Para programarlo sin depender del evento `schedule` de GitHub, el servidor expone `POST /api/cron/facturas-komet`. Un programador externo debe llamarlo cada 3 horas enviando el encabezado `X-Cron-Secret`; Render conserva el secreto y usa `GITHUB_TOKEN` para disparar el workflow manual. El servicio externo no debe recibir ni guardar el token de GitHub.
 
+Antes de activar envíos reales, el bot mantiene la bitácora `bot/data/facturas_enviadas.json`. La clave de cada registro combina el número y la fecha de la orden. Las órdenes omitidas por aparecer en esa bitácora no se procesan otra vez; las pruebas en modo `cancel` no agregan registros. El workflow sólo guarda cambios de esa bitácora cuando `KOMET_EMAIL_MODE` está en `send` y `KOMET_ALLOW_SEND` vale `YES`.
+
 ## Configuración local
 
 Requisitos: Node.js 22.12 o posterior y npm.
