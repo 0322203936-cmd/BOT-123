@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      KOMET_EMAIL_MODE: cancel
-      KOMET_ALLOW_SEND: NO
+      KOMET_EMAIL_MODE: send
+      KOMET_ALLOW_SEND: YES
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
           pip install -r bot/requirements.txt
           playwright install --with-deps chromium
 
-      - name: Preparar documentos sin enviar correos
+      - name: Enviar documentos por correo
         env:
           KOMET_USER: ${{ secrets.KOMET_USER }}
           KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
