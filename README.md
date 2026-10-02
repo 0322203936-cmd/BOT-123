@@ -46,6 +46,8 @@ El workflow manual está en `.github/workflows/facturas-komet.yml` y requiere es
 
 Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 días. El workflow permanece manual para poder revisar las capturas antes de automatizar cualquier envío.
 
+Para programarlo sin depender del evento `schedule` de GitHub, el servidor expone `POST /api/cron/facturas-komet`. Un programador externo debe llamarlo cada 3 horas enviando el encabezado `X-Cron-Secret`; Render conserva el secreto y usa `GITHUB_TOKEN` para disparar el workflow manual. El servicio externo no debe recibir ni guardar el token de GitHub.
+
 ## Configuración local
 
 Requisitos: Node.js 22.12 o posterior y npm.

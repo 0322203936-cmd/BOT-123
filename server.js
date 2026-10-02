@@ -12,6 +12,7 @@ const owner = process.env.GITHUB_OWNER || '0322203936-cmd';
 const branch = process.env.GITHUB_BRANCH || 'main';
 const githubToken = process.env.GITHUB_TOKEN || '';
 const appPassword = process.env.APP_PASSWORD || '';
+const facturasCronSecret = process.env.FACTURAS_KOMET_CRON_SECRET || '';
 
 const workflows = {
   galleria: {
@@ -216,16 +217,27 @@ app.use(
 app.use('/api/workflows/cajas/email-config', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '10kb' }));
 
-function passwordsMatch(received) {
-  if (!appPassword) return true;
-  const expected = Buffer.from(appPassword);
+function secretsMatch(received, expectedSecret) {
+  if (!expectedSecret) return true;
+  const expected = Buffer.from(expectedSecret);
   const actual = Buffer.from(received || '');
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function passwordsMatch(received) {
+  return secretsMatch(received, appPassword);
 }
 
 function authenticate(req, res, next) {
   if (!passwordsMatch(req.get('X-App-Password'))) {
     return res.status(401).json({ message: 'La contraseña no es correcta.' });
+  }
+  next();
+}
+
+function authenticateFacturasCron(req, res, next) {
+  if (!facturasCronSecret || !secretsMatch(req.get('X-Cron-Secret'), facturasCronSecret)) {
+    return res.status(401).json({ message: 'El secreto del programador no es correcto.' });
   }
   next();
 }
@@ -788,6 +800,45 @@ async function latestRun(workflow) {
   return serializeRun(data.workflow_runs?.[0]);
 }
 
+async function dispatchWorkflow(key) {
+  const workflow = workflows[key];
+  if (!workflow) {
+    const error = new Error('Automatización no encontrada.');
+    error.status = 404;
+    throw error;
+  }
+
+  const previous = lastDispatch.get(key) || 0;
+  if (Date.now() - previous < 15_000) {
+    const error = new Error('Espera unos segundos antes de volver a ejecutar este bot.');
+    error.status = 429;
+    throw error;
+  }
+
+  const currentRun = await latestRun(workflow);
+  if (currentRun && (currentRun.status === 'queued' || currentRun.status === 'in_progress')) {
+    const error = new Error(`${workflow.name} ya tiene una ejecución activa.`);
+    error.status = 409;
+    throw error;
+  }
+
+  await githubRequest(
+    `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/workflows/${encodeURIComponent(workflow.file)}/dispatches`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref: workflow.branch }),
+    },
+  );
+
+  const dispatchedAt = Date.now();
+  lastDispatch.set(key, dispatchedAt);
+  return {
+    message: `${workflow.name} fue enviado correctamente a GitHub.`,
+    dispatchedAt: new Date(dispatchedAt).toISOString(),
+  };
+}
+
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/config', (_req, res) => {
@@ -907,34 +958,17 @@ app.get('/api/workflows', authenticate, async (_req, res, next) => {
 
 app.post('/api/workflows/:key/dispatch', authenticate, async (req, res, next) => {
   try {
-    const workflow = workflows[req.params.key];
-    if (!workflow) return res.status(404).json({ message: 'Automatización no encontrada.' });
+    const result = await dispatchWorkflow(req.params.key);
+    res.status(202).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const previous = lastDispatch.get(req.params.key) || 0;
-    if (Date.now() - previous < 15_000) {
-      return res.status(429).json({ message: 'Espera unos segundos antes de volver a ejecutar este bot.' });
-    }
-
-    const currentRun = await latestRun(workflow);
-    if (currentRun && (currentRun.status === 'queued' || currentRun.status === 'in_progress')) {
-      return res.status(409).json({ message: `${workflow.name} ya tiene una ejecución activa.` });
-    }
-
-    await githubRequest(
-      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/workflows/${encodeURIComponent(workflow.file)}/dispatches`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: workflow.branch }),
-      },
-    );
-
-    const dispatchedAt = Date.now();
-    lastDispatch.set(req.params.key, dispatchedAt);
-    res.status(202).json({
-      message: `${workflow.name} fue enviado correctamente a GitHub.`,
-      dispatchedAt: new Date(dispatchedAt).toISOString(),
-    });
+app.post('/api/cron/facturas-komet', authenticateFacturasCron, async (_req, res, next) => {
+  try {
+    const result = await dispatchWorkflow('facturasKomet');
+    res.status(202).json(result);
   } catch (error) {
     next(error);
   }
