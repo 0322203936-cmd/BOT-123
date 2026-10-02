@@ -15,6 +15,9 @@ KOMET_LOGIN_URL = "https://app.kometsales.com/sign-in/login.do#st"
 ARTIFACTS_DIR = Path("artifacts/facturas_komet")
 CAPTURES_DIR = ARTIFACTS_DIR / "capturas"
 SUMMARY_PATH = ARTIFACTS_DIR / "summary.json"
+SENT_ORDERS_PATH = Path(
+    os.environ.get("KOMET_SENT_ORDERS_PATH", "bot/data/facturas_enviadas.json")
+)
 DEFAULT_TIMEZONE = "America/Tijuana"
 DEFAULT_TIMEOUT_MS = 60_000
 ORDER_CODE_PATTERN = re.compile(r"\b(?:K2K\s*)?\d{6}\b|\b[A-Z]{1,3}\d{6}\b", re.I)
@@ -73,6 +76,34 @@ def normalize_space(value: str) -> str:
 def safe_filename(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")
     return value[:80] or "orden"
+
+
+def order_key(order: dict[str, str]) -> str:
+    code = normalize_space(order.get("order", "")) or normalize_space(order.get("internal_id", ""))
+    order_date = normalize_space(order.get("date", "")) or "sin-fecha"
+    return f"{code}|{order_date}"
+
+
+def load_sent_order_keys(path: Path = SENT_ORDERS_PATH) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"No se pudo leer la bitácora de facturas enviadas: {path}.") from error
+    keys = payload.get("sent_orders", [])
+    if not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
+        raise RuntimeError(f"La bitácora de facturas enviadas tiene un formato inválido: {path}.")
+    return set(keys)
+
+
+def save_sent_order_keys(keys: set[str], path: Path = SENT_ORDERS_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "sent_orders": sorted(keys),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def komet_dates() -> tuple[date, date]:
@@ -301,7 +332,35 @@ def cancel_email_dialog(page: Page, dialog) -> None:
     raise RuntimeError("No se encontró el botón Cancelar del diálogo de correo.")
 
 
-def process_order(page: Page, order: dict[str, str], index: int) -> dict[str, str]:
+def send_email_dialog(page: Page, dialog) -> None:
+    pattern = re.compile(r"^\s*enviar\s*$", re.I)
+    roots = [dialog, page] if dialog else [page]
+    clicked = False
+    for root in roots:
+        if root is None:
+            continue
+        try:
+            click_first_visible(
+                page,
+                [
+                    root.get_by_role("button", name=pattern),
+                    root.get_by_role("link", name=pattern),
+                    root.get_by_text(pattern),
+                ],
+                "Enviar documentos por correo",
+            )
+            clicked = True
+            break
+        except RuntimeError:
+            continue
+    if not clicked:
+        raise RuntimeError("No se encontró el botón Enviar del diálogo de correo.")
+    page.wait_for_timeout(1_500)
+    if dialog is not None and visible_locator(dialog) is not None:
+        raise RuntimeError("Komet mantuvo abierto el diálogo después de presionar Enviar.")
+
+
+def process_order(page: Page, order: dict[str, str], index: int, mode: str) -> dict[str, str]:
     internal_id = order["internal_id"]
     order_label = safe_filename(f"{order['order']}-{order['date'] or internal_id}")
     row = page.locator(f"#gridResults tr:has(#{order['checkbox_id']})").first
@@ -332,12 +391,21 @@ def process_order(page: Page, order: dict[str, str], index: int) -> dict[str, st
     page.locator("#txtDialogOrderMailTo").wait_for(state="visible", timeout=20_000)
     dialog = fill_email_dialog(page)
     capture(page, f"{index:03d}_{order_label}_02_documentos_preparados.png")
-    cancel_email_dialog(page, dialog)
-    capture(page, f"{index:03d}_{order_label}_03_cancelado.png")
+    if mode == "cancel":
+        cancel_email_dialog(page, dialog)
+        capture(page, f"{index:03d}_{order_label}_03_cancelado.png")
+        return {
+            **order,
+            "status": "cancelado",
+            "mode": mode,
+        }
+
+    send_email_dialog(page, dialog)
+    capture(page, f"{index:03d}_{order_label}_03_enviado.png")
     return {
         **order,
-        "status": "cancelado",
-        "mode": "cancel",
+        "status": "enviado",
+        "mode": mode,
     }
 
 
@@ -347,17 +415,17 @@ def run() -> None:
         raise RuntimeError("KOMET_EMAIL_MODE debe ser cancel o send.")
     if mode == "send" and os.environ.get("KOMET_ALLOW_SEND", "") != "YES":
         raise RuntimeError("El envío real está bloqueado. Define KOMET_ALLOW_SEND=YES sólo cuando sea autorizado.")
-    if mode != "cancel":
-        raise RuntimeError("Este workflow está reservado para pruebas y debe ejecutarse en modo cancel.")
 
     user = required_secret("KOMET_USER")
     password = required_secret("KOMET_PASSWORD")
     from_date, until_date = komet_dates()
+    sent_order_keys = load_sent_order_keys()
     summary = {
         "mode": mode,
         "timezone": os.environ.get("KOMET_TIMEZONE", DEFAULT_TIMEZONE),
         "orden_desde": format_komet_date(from_date),
         "orden_hasta": format_komet_date(until_date),
+        "sent_orders_file": str(SENT_ORDERS_PATH),
         "orders": [],
     }
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -382,21 +450,49 @@ def run() -> None:
                 processed_pages.add(page_signature(rows))
                 print(f"Órdenes encontradas en la página: {len(rows)}", flush=True)
                 for order in rows:
-                    try:
-                        result = process_order(page, order, next_index)
-                        summary["orders"].append(result)
-                        print(f"Orden {order['order']} preparada y cancelada.", flush=True)
-                    except Exception as error:
-                        summary["orders"].append({**order, "status": "error", "error": str(error)})
-                        capture(page, f"{next_index:03d}_{safe_filename(order['order'])}_99_error.png")
-                        raise
+                    current_index = next_index
                     next_index += 1
+                    key = order_key(order)
+                    if key in sent_order_keys:
+                        summary["orders"].append(
+                            {
+                                **order,
+                                "order_key": key,
+                                "status": "omitido_ya_enviado",
+                                "mode": mode,
+                            }
+                        )
+                        print(f"Orden {order['order']} omitida: ya fue enviada.", flush=True)
+                        continue
+                    try:
+                        result = process_order(page, order, current_index, mode)
+                        result["order_key"] = key
+                        summary["orders"].append(result)
+                        if result["status"] == "enviado":
+                            sent_order_keys.add(key)
+                            save_sent_order_keys(sent_order_keys)
+                            print(f"Orden {order['order']} enviada y registrada.", flush=True)
+                        else:
+                            print(f"Orden {order['order']} preparada y cancelada.", flush=True)
+                    except Exception as error:
+                        summary["orders"].append(
+                            {**order, "order_key": key, "status": "error", "error": str(error)}
+                        )
+                        capture(page, f"{current_index:03d}_{safe_filename(order['order'])}_99_error.png")
+                        raise
                 if not click_next_page(page):
                     break
 
             summary["total"] = len(summary["orders"])
             summary["cancelled"] = sum(item.get("status") == "cancelado" for item in summary["orders"])
-            print(f"Prueba terminada: {summary['cancelled']} de {summary['total']} órdenes canceladas sin enviar correo.", flush=True)
+            summary["sent"] = sum(item.get("status") == "enviado" for item in summary["orders"])
+            summary["skipped"] = sum(item.get("status") == "omitido_ya_enviado" for item in summary["orders"])
+            summary["errors"] = sum(item.get("status") == "error" for item in summary["orders"])
+            print(
+                f"Proceso terminado: {summary['sent']} enviadas, "
+                f"{summary['cancelled']} canceladas y {summary['skipped']} omitidas.",
+                flush=True,
+            )
         except Exception:
             try:
                 capture(page, "999_error_general.png")
