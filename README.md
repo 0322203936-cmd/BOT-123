@@ -43,6 +43,10 @@ El workflow manual está en `.github/workflows/facturas-komet.yml` y requiere es
 - `KOMET_USER`
 - `KOMET_PASSWORD`
 - `KOMET_INVOICE_EMAIL`
+- `KOMET_PICK_TICKET_EMAIL`
+- `KOMET_LABELS_EMAIL`
+
+Los tres destinatarios se configuran por separado: `KOMET_INVOICE_EMAIL` para Factura, `KOMET_PICK_TICKET_EMAIL` para Pick Ticket y `KOMET_LABELS_EMAIL` para Etiquetas.
 
 Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 días. El workflow permanece manual para poder revisar las capturas antes de automatizar cualquier envío.
 

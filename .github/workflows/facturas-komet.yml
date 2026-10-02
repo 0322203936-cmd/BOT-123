@@ -38,6 +38,8 @@ jobs:
           KOMET_USER: ${{ secrets.KOMET_USER }}
           KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
           KOMET_INVOICE_EMAIL: ${{ secrets.KOMET_INVOICE_EMAIL }}
+          KOMET_PICK_TICKET_EMAIL: ${{ secrets.KOMET_PICK_TICKET_EMAIL }}
+          KOMET_LABELS_EMAIL: ${{ secrets.KOMET_LABELS_EMAIL }}
           KOMET_TIMEZONE: America/Tijuana
         run: python -u bot/facturas_komet.py
 
