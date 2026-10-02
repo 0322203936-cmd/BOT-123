@@ -1,6 +1,6 @@
 # Atajos Globales
 
-Panel Angular para ejecutar manualmente los bots de Galleria, Posco y el flujo de inventario de cajas de Kometsales.
+Panel Angular para ejecutar manualmente los bots de Galleria, Posco, inventario de cajas y facturas de Kometsales.
 
 La aplicación usa un servidor Node/Express para que el token de GitHub nunca llegue al navegador. El mismo servidor entrega la compilación de Angular, por lo que se despliega como un solo Web Service en Render.
 
@@ -33,6 +33,18 @@ El workflow está en `.github/workflows/inventory-boxes.yml` y requiere estos se
 - `SHAREPOINT_CLIENT_SECRET`
 
 El botón solicita `CONFIRMAR` antes de enviarlo a GitHub Actions porque el proceso elimina el inventario existente.
+
+## Bot Facturas Komet (modo prueba)
+
+El botón **Facturas Komet** inicia sesión en Kometsales, selecciona **PACIFICA FARMS - CAL**, abre Ventas y busca órdenes desde la fecha actual hasta diez días después. Para cada orden prepara **Factura**, **Pick Ticket** y **Etiquetas** con el correo configurado, guarda capturas de cada paso y presiona **Cancelar**. En esta etapa no existe ningún clic de envío de correo.
+
+El workflow manual está en `.github/workflows/facturas-komet.yml` y requiere estos secretos en `BOT-123`:
+
+- `KOMET_USER`
+- `KOMET_PASSWORD`
+- `KOMET_INVOICE_EMAIL`
+
+Las imágenes se guardan en el artifact `evidencias-facturas-komet-*` durante 7 días. El workflow permanece manual para poder revisar las capturas antes de automatizar cualquier envío.
 
 ## Configuración local
 
