@@ -23,6 +23,8 @@ services:
         sync: false
       - key: APP_PASSWORD
         sync: false
+      - key: FACTURAS_KOMET_CRON_SECRET
+        sync: false
       - key: SHAREPOINT_TENANT_ID
         sync: false
       - key: SHAREPOINT_CLIENT_ID
