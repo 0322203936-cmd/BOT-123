@@ -2,6 +2,9 @@ name: Bot Facturas Komet - Prueba
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 */3 * * *"
+      timezone: "America/Tijuana"
 
 concurrency:
   group: kometsales-facturas-prueba
