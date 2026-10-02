@@ -140,12 +140,27 @@ def login_kometsales(page: Page, user: str, password: str) -> None:
     account = page.get_by_text(re.compile(r"^\s*PACIFICA\s+FARMS\s*-\s*CAL\s*$", re.I))
     if account.count() > 0 and visible_locator(account) is not None:
         click_first_visible(page, [account], "PACIFICA FARMS - CAL")
-        wait_for_network(page)
-        page.wait_for_timeout(2_000)
+        wait_for_dashboard_menu(page)
 
     if "accounts.do" in page.url.lower():
         raise RuntimeError("No se pudo seleccionar PACIFICA FARMS - CAL en Kometsales.")
     print(f"Sesión de Kometsales iniciada. URL: {page.url}", flush=True)
+
+
+def wait_for_dashboard_menu(page: Page) -> None:
+    ventas_pattern = re.compile(r"^\s*ventas\s*$", re.I)
+    candidates = [
+        page.get_by_role("button", name=ventas_pattern),
+        page.get_by_role("link", name=ventas_pattern),
+        page.get_by_text(ventas_pattern),
+    ]
+    deadline = monotonic() + 30
+    while monotonic() < deadline:
+        if any(visible_locator(candidate) is not None for candidate in candidates):
+            page.wait_for_timeout(500)
+            return
+        page.wait_for_timeout(250)
+    raise RuntimeError("Komet no terminó de cargar el menú Ventas después de seleccionar el proveedor.")
 
 
 def open_orders(page: Page) -> None:
@@ -167,7 +182,10 @@ def open_orders(page: Page) -> None:
     wait_for_network(page)
     page.wait_for_timeout(1_500)
     if visible_locator(page.locator("#gridResults")) is None:
-        raise RuntimeError("No se encontró la tabla de órdenes de Ventas en Kometsales.")
+        print(
+            "Komet abrió Ventas sin registros iniciales; se continuará para aplicar el rango de fechas.",
+            flush=True,
+        )
     capture(page, "01_ventas_seleccionada.png")
 
 
