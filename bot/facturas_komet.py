@@ -141,21 +141,33 @@ def open_orders(page: Page) -> None:
 
 
 def fill_order_dates(page: Page, from_date: date, until_date: date) -> None:
-    from_input = visible_locator(
-        page.locator(
-            "#txtFromDateTo, input[id*='from' i], input[name*='from' i], input[placeholder*='desde' i]"
-        )
-    )
-    until_input = visible_locator(
-        page.locator(
-            "#txtDateTo, input[id*='to' i], input[name*='to' i], input[placeholder*='hasta' i]"
-        )
-    )
-    if from_input is None or until_input is None:
-        raise RuntimeError("No se encontraron los campos Orden desde y Orden hasta.")
+    from_value = format_komet_date(from_date)
+    until_value = format_komet_date(until_date)
+    from_input = page.locator("#txtFromDateTo")
+    until_input = page.locator("#txtDateTo")
+    order_input = page.locator("#txtOrder")
+    if from_input.count() != 1 or until_input.count() != 1:
+        raise RuntimeError("No se encontraron exactamente los campos Orden desde y Orden hasta.")
 
-    from_input.fill(format_komet_date(from_date))
-    until_input.fill(format_komet_date(until_date))
+    # No usar selectores genéricos como input[id*='to']: txtOrder también contiene "to".
+    if order_input.count() == 1:
+        order_input.fill("")
+    from_input.fill(from_value)
+    from_input.press("Tab")
+    page.wait_for_timeout(250)
+    until_input.fill(until_value)
+    until_input.press("Tab")
+    page.wait_for_timeout(250)
+
+    actual_from = from_input.input_value()
+    actual_until = until_input.input_value()
+    actual_order = order_input.input_value() if order_input.count() == 1 else ""
+    if actual_from != from_value or actual_until != until_value or actual_order:
+        raise RuntimeError(
+            "Komet no conservó el filtro solicitado: "
+            f"Orden={actual_order!r}, desde={actual_from!r}, hasta={actual_until!r}."
+        )
+    print(f"Filtro validado: desde {actual_from} hasta {actual_until}.", flush=True)
     capture(page, "02_fechas_configuradas.png")
 
 
