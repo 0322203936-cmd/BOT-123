@@ -16,6 +16,7 @@ from openpyxl.utils.datetime import from_excel
 
 DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
 KOMET_SHEET_NAME = "Availability"
+AVAILABILITY_TABLE_NAME = "tblAvailability2"
 
 
 @dataclass(frozen=True)
@@ -576,7 +577,7 @@ def refresh_workbook_with_komet_inventory(
     try:
         availability = workbook[KOMET_SHEET_NAME]
         _, availability_header_row, availability_max_col, availability_max_row = _table_bounds(
-            availability, "tblAvailability"
+            availability, AVAILABILITY_TABLE_NAME
         )
         availability_headers = {
             str(availability.cell(availability_header_row, column).value or "").strip().lower(): column
@@ -584,7 +585,9 @@ def refresh_workbook_with_komet_inventory(
         }
         required = {"product description", "qty packages", "available from"}
         if not required.issubset(availability_headers):
-            raise RuntimeError("tblAvailability no contiene Product Description, Qty Packages y Available From.")
+            raise RuntimeError(
+                f"{AVAILABILITY_TABLE_NAME} no contiene Product Description, Qty Packages y Available From."
+            )
 
         old_inventory_book = workbook
         old_inventory_rows, _, _ = _inventory_rows(old_inventory_book, "Inventory", table_name="tblInventory")

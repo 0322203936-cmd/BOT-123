@@ -287,7 +287,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
             workbook = Workbook()
             customer = workbook.active
             customer.title = "Customer View"
-            customer["A1"] = "=SUM(tblAvailability[Qty Packages])"
+            customer["A1"] = "=SUM(tblAvailability2[Qty Packages])"
             availability = workbook.create_sheet("Availability")
             availability.append(
                 [
@@ -305,7 +305,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Pacific", "A product", "Bunch", "L", 10, 1, "=OLD", 3, date(2026, 9, 15)])
             availability.append(["Pacific", "B product", "Bunch", "L", 10, 1, 3, 3, date(2026, 9, 15)])
             availability.append(["Pacific", "Missing product", "Bunch", "L", 10, 1, "=OLD", 3, date(2026, 9, 15)])
-            availability.add_table(Table(displayName="tblAvailability", ref="A1:I4"))
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I4"))
 
             inventory = workbook.create_sheet("Inventory")
             inventory.append(["Inventory source"])
@@ -337,7 +337,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
             workbook = load_workbook(output, data_only=False)
             try:
                 self.assertEqual(workbook.sheetnames, ["Customer View", "Availability", "Inventory"])
-                self.assertEqual(workbook["Customer View"]["A1"].value, "=SUM(tblAvailability[Qty Packages])")
+                self.assertEqual(workbook["Customer View"]["A1"].value, "=SUM(tblAvailability2[Qty Packages])")
                 self.assertEqual([workbook["Availability"][f"G{row}"].value for row in (2, 3, 4)], [5, 3, 0])
                 self.assertTrue(all(not str(workbook["Availability"][f"G{row}"].value).startswith("=") for row in (2, 3, 4)))
                 self.assertEqual(workbook["Inventory"]["D9"].value, "A product")
