@@ -1,8 +1,12 @@
 import base64
 import hashlib
 import os
+import re
 import time
+from datetime import datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote
 from zipfile import ZipFile
 
 import requests
@@ -52,6 +56,140 @@ def graph_token() -> str:
 
 def graph_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _workbook_request(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    *,
+    json: dict[str, Any] | None = None,
+    timeout: int = 120,
+) -> requests.Response:
+    retryable_statuses = {409, 423, 429, 500, 502, 503, 504}
+    for attempt in range(1, 6):
+        response = requests.request(
+            method,
+            url,
+            headers=headers,
+            json=json,
+            timeout=timeout,
+        )
+        if response.status_code in retryable_statuses and attempt < 5:
+            delay = int(response.headers.get("Retry-After", "0") or 0) or min(
+                5 * attempt, 30
+            )
+            print(
+                f"Excel Online respondio HTTP {response.status_code}; "
+                f"reintento {attempt}/4 en {delay} segundos...",
+                flush=True,
+            )
+            time.sleep(delay)
+            continue
+        if not response.ok:
+            try:
+                detail = response.json().get("error", {}).get("message", "")
+            except ValueError:
+                detail = response.text
+            raise RuntimeError(
+                f"Microsoft Graph respondio {response.status_code}: {detail}"
+            )
+        return response
+    raise RuntimeError("Excel Online no respondio despues de los reintentos.")
+
+
+def _excel_column_number(column: str) -> int:
+    value = 0
+    for character in column.upper():
+        value = value * 26 + ord(character) - ord("A") + 1
+    return value
+
+
+def _range_start(address: str) -> tuple[int, int]:
+    match = re.search(r"!\$?([A-Z]+)\$?(\d+)", address.upper())
+    if not match:
+        match = re.search(r"\$?([A-Z]+)\$?(\d+)", address.upper())
+    if not match:
+        raise RuntimeError(f"Excel Online devolvio un rango invalido: {address!r}.")
+    return _excel_column_number(match.group(1)), int(match.group(2))
+
+
+def _coerce_calculated_value(value: Any) -> Any:
+    if not isinstance(value, str) or "T" not in value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return parsed.replace(tzinfo=None)
+
+
+def read_calculated_worksheet_values(
+    token: str,
+    item: dict[str, Any],
+    sheet_name: str,
+) -> dict[str, Any]:
+    """Recalculate a SharePoint workbook with Excel Online and read a sheet's values."""
+    drive_id = item["parentReference"]["driveId"]
+    item_id = item["id"]
+    workbook_url = f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/workbook"
+    headers = {**graph_headers(token), "Content-Type": "application/json"}
+    session = _workbook_request(
+        "POST",
+        f"{workbook_url}/createSession",
+        headers,
+        json={"persistChanges": False},
+        timeout=120,
+    ).json()
+    session_headers = {**headers, "workbook-session-id": session["id"]}
+    encoded_sheet_name = quote(sheet_name, safe="")
+    try:
+        _workbook_request(
+            "POST",
+            f"{workbook_url}/application/calculate",
+            session_headers,
+            json={"calculationType": "Full"},
+            timeout=120,
+        )
+        used_range = _workbook_request(
+            "GET",
+            f"{workbook_url}/worksheets('{encoded_sheet_name}')/usedRange",
+            session_headers,
+            timeout=120,
+        ).json()
+        address = str(used_range.get("address") or "")
+        values = used_range.get("values")
+        if not address or not isinstance(values, list):
+            raise RuntimeError(
+                f"Excel Online no devolvio valores utilizables para {sheet_name}."
+            )
+        start_column, start_row = _range_start(address)
+        calculated: dict[str, Any] = {}
+        for row_offset, row_values in enumerate(values):
+            if not isinstance(row_values, list):
+                continue
+            for column_offset, value in enumerate(row_values):
+                column_number = start_column + column_offset
+                column_text = ""
+                current = column_number
+                while current:
+                    current, remainder = divmod(current - 1, 26)
+                    column_text = chr(ord("A") + remainder) + column_text
+                calculated[f"{column_text}{start_row + row_offset}"] = (
+                    _coerce_calculated_value(value)
+                )
+        if not calculated:
+            raise RuntimeError(f"Excel Online devolvio vacia la hoja {sheet_name}.")
+        return calculated
+    finally:
+        try:
+            requests.post(
+                f"{workbook_url}/closeSession",
+                headers=session_headers,
+                timeout=30,
+            )
+        except requests.RequestException:
+            pass
 
 
 def share_id(url: str) -> str:

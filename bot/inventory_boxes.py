@@ -13,6 +13,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sy
 from sharepoint_sync import (
     download_sharepoint_file,
     graph_token,
+    read_calculated_worksheet_values,
     resolve_sharepoint_item_by_url,
     upload_sharepoint_file,
 )
@@ -686,6 +687,11 @@ def run() -> None:
                     create_inventory_email_workbook(
                         source_path,
                         email_attachment_path,
+                        customer_view_values=read_calculated_worksheet_values(
+                            sharepoint_token,
+                            sharepoint_item,
+                            "Customer View",
+                        ),
                     )
                     email_attachment_ready = True
                     print(

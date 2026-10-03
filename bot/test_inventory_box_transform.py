@@ -10,11 +10,6 @@ from openpyxl.worksheet.table import Table
 from openpyxl.styles import Font, PatternFill
 
 try:
-    import inventory_box_transform as inventory_transform_module
-except ImportError:
-    import bot.inventory_box_transform as inventory_transform_module
-
-try:
     from inventory_box_transform import (
         DATE_NUMBER_FORMAT,
         apply_inventory_rules,
@@ -254,20 +249,11 @@ class InventoryBoxTransformTests(unittest.TestCase):
             workbook.save(source)
             workbook.close()
 
-            def fake_recalculate(source_path: Path, output_dir: Path) -> Path:
-                recalculated = output_dir / source_path.name
-                calculated = load_workbook(source_path, data_only=False)
-                calculated["Customer View"]["A2"] = 15
-                calculated.save(recalculated)
-                calculated.close()
-                return recalculated
-
-            with patch.object(
-                inventory_transform_module,
-                "_recalculate_workbook_with_libreoffice",
-                side_effect=fake_recalculate,
-            ):
-                create_inventory_email_workbook(source, output)
+            create_inventory_email_workbook(
+                source,
+                output,
+                customer_view_values={"A2": 15},
+            )
 
             result = load_workbook(output, data_only=False)
             try:
