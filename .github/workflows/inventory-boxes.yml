@@ -33,9 +33,6 @@ jobs:
           pip install -r bot/requirements.txt
           playwright install --with-deps chromium
 
-      - name: Instalar LibreOffice para recalcular Customer View
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-calc
-
       - name: Vaciar y subir inventario de cajas
         env:
           KOMET_USER: ${{ secrets.KOMET_USER }}

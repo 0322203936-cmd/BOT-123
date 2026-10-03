@@ -3,13 +3,9 @@ from __future__ import annotations
 from copy import copy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
-from tempfile import TemporaryDirectory
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -845,60 +841,12 @@ def _is_formula_cell_value(value: Any) -> bool:
     )
 
 
-def _recalculate_workbook_with_libreoffice(source_path: Path, output_dir: Path) -> Path:
-    """Create a recalculated XLSX copy so formula results can be frozen."""
-    executable = os.environ.get("SOFFICE_PATH", "").strip()
-    if not executable:
-        executable = shutil.which("soffice") or shutil.which("libreoffice") or ""
-    if not executable:
-        raise RuntimeError(
-            "No se encontró LibreOffice (soffice) para recalcular Customer View."
-        )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    profile_dir = output_dir / "libreoffice-profile"
-    command = [
-        executable,
-        "--headless",
-        "--norestore",
-        "--nodefault",
-        "--nolockcheck",
-        "--nofirststartwizard",
-        f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
-        "--convert-to",
-        "xlsx:Calc MS Excel 2007 XML",
-        "--outdir",
-        str(output_dir),
-        str(source_path),
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("LibreOffice agotó el tiempo al recalcular Customer View.") from exc
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout).strip()
-        raise RuntimeError(
-            "LibreOffice no pudo recalcular el libro."
-            + (f" Detalle: {details}" if details else "")
-        )
-
-    recalculated_path = output_dir / source_path.name
-    if not recalculated_path.exists():
-        details = (result.stderr or result.stdout).strip()
-        raise RuntimeError(
-            "LibreOffice terminó sin generar el libro recalculado."
-            + (f" Detalle: {details}" if details else "")
-        )
-    return recalculated_path
-
-
-def create_inventory_email_workbook(source_path: Path, output_path: Path) -> None:
+def create_inventory_email_workbook(
+    source_path: Path,
+    output_path: Path,
+    *,
+    customer_view_values: Mapping[str, Any] | None = None,
+) -> None:
     """Create the Cajas email workbook with Inventory and static Customer View values."""
     workbook = load_workbook(source_path, data_only=False, keep_links=True)
     try:
@@ -917,34 +865,22 @@ def create_inventory_email_workbook(source_path: Path, output_path: Path) -> Non
         ]
 
         if formula_coordinates:
-            with TemporaryDirectory(prefix="cajas-recalc-") as temp_dir:
-                recalculated_path = _recalculate_workbook_with_libreoffice(
-                    source_path,
-                    Path(temp_dir),
+            if customer_view_values is None:
+                raise RuntimeError(
+                    "No se recibieron valores calculados de Excel Online para Customer View."
                 )
-                calculated_workbook = load_workbook(
-                    recalculated_path,
-                    data_only=True,
-                    keep_links=True,
+            missing_coordinates = [
+                coordinate
+                for coordinate in formula_coordinates
+                if coordinate not in customer_view_values
+            ]
+            if missing_coordinates:
+                raise RuntimeError(
+                    "Excel Online no devolvió valores para estas celdas de Customer View: "
+                    + ", ".join(missing_coordinates[:10])
                 )
-                try:
-                    if "Customer View" not in calculated_workbook.sheetnames:
-                        raise RuntimeError(
-                            "El libro recalculado no contiene la pestaña Customer View."
-                        )
-                    calculated_view = calculated_workbook["Customer View"]
-                    calculated_values = [
-                        calculated_view[coordinate].value
-                        for coordinate in formula_coordinates
-                    ]
-                    if all(value is None for value in calculated_values):
-                        raise RuntimeError(
-                            "LibreOffice no devolvió valores calculados para Customer View."
-                        )
-                    for coordinate, value in zip(formula_coordinates, calculated_values):
-                        customer_view[coordinate].value = value
-                finally:
-                    calculated_workbook.close()
+            for coordinate in formula_coordinates:
+                customer_view[coordinate].value = customer_view_values[coordinate]
 
         for worksheet in tuple(workbook.worksheets):
             if worksheet.title not in required_sheets:
