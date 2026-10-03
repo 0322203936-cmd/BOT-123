@@ -18,6 +18,7 @@ from sharepoint_sync import (
 )
 from email_sender import load_email_config, send_report_email
 from inventory_box_transform import (
+    create_inventory_email_workbook,
     create_single_sheet_workbook,
     refresh_workbook_with_komet_inventory,
     transform_inventory_workbook,
@@ -682,12 +683,16 @@ def run() -> None:
                 delete_all_inventory(page)
                 upload_boxes(page, komet_upload_path)
                 if email_config:
-                    create_single_sheet_workbook(
+                    create_inventory_email_workbook(
                         source_path,
                         email_attachment_path,
-                        sheet_name="Inventory",
                     )
                     email_attachment_ready = True
+                    print(
+                        "Correo preparado con Inventory y Customer View como valores; "
+                        "Availability no se incluye.",
+                        flush=True,
+                    )
                 print(f"Proceso completo. URL final: {page.url}", flush=True)
             except Exception:
                 capture(page, "99_error.png")

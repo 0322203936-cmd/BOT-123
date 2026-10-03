@@ -10,9 +10,15 @@ from openpyxl.worksheet.table import Table
 from openpyxl.styles import Font, PatternFill
 
 try:
+    import inventory_box_transform as inventory_transform_module
+except ImportError:
+    import bot.inventory_box_transform as inventory_transform_module
+
+try:
     from inventory_box_transform import (
         DATE_NUMBER_FORMAT,
         apply_inventory_rules,
+        create_inventory_email_workbook,
         create_single_sheet_workbook,
         transform_inventory_workbook,
         refresh_workbook_with_komet_inventory,
@@ -22,6 +28,7 @@ except ImportError:
         from bot.inventory_box_transform import (
             DATE_NUMBER_FORMAT,
             apply_inventory_rules,
+            create_inventory_email_workbook,
             create_single_sheet_workbook,
             transform_inventory_workbook,
             refresh_workbook_with_komet_inventory,
@@ -30,6 +37,7 @@ except ImportError:
         apply_inventory_rules = None
         create_single_sheet_workbook = None
         DATE_NUMBER_FORMAT = None
+        create_inventory_email_workbook = None
         transform_inventory_workbook = None
         refresh_workbook_with_komet_inventory = None
 try:
@@ -222,6 +230,51 @@ class InventoryBoxTransformTests(unittest.TestCase):
             try:
                 self.assertEqual(result.sheetnames, ["Inventory"])
                 self.assertEqual(result["Inventory"]["A1"].value, "Inventory only")
+            finally:
+                result.close()
+
+    def test_creates_email_copy_with_static_customer_view_and_without_availability(self) -> None:
+        self.assertIsNotNone(create_inventory_email_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "email.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            customer["A1"] = "Total"
+            customer["A2"] = "=SUM(Availability!B2:B3)"
+            customer["A2"].font = Font(bold=True)
+            availability = workbook.create_sheet("Availability")
+            availability.append(["Product", "Qty"])
+            availability.append(["A", 5])
+            availability.append(["B", 10])
+            inventory = workbook.create_sheet("Inventory")
+            inventory["A1"] = "Inventory"
+            workbook.create_sheet("Order Form")
+            workbook.save(source)
+            workbook.close()
+
+            def fake_recalculate(source_path: Path, output_dir: Path) -> Path:
+                recalculated = output_dir / source_path.name
+                calculated = load_workbook(source_path, data_only=False)
+                calculated["Customer View"]["A2"] = 15
+                calculated.save(recalculated)
+                calculated.close()
+                return recalculated
+
+            with patch.object(
+                inventory_transform_module,
+                "_recalculate_workbook_with_libreoffice",
+                side_effect=fake_recalculate,
+            ):
+                create_inventory_email_workbook(source, output)
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result.sheetnames, ["Customer View", "Inventory"])
+                self.assertEqual(result["Customer View"]["A2"].value, 15)
+                self.assertTrue(result["Customer View"]["A2"].font.bold)
+                self.assertEqual(result["Inventory"]["A1"].value, "Inventory")
             finally:
                 result.close()
 
