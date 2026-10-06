@@ -72,6 +72,22 @@ def visible_locator(locator) -> object | None:
     return None
 
 
+def is_login_page(page: Page) -> bool:
+    """Return True when Komet redirected the browser back to its login page."""
+    try:
+        if "sign-in/login.do" in page.url.lower():
+            return True
+    except Exception:
+        pass
+
+    password_input = page.locator('input[type="password"]')
+    login_control = page.get_by_role(
+        "button",
+        name=re.compile(r"iniciar sesión|entrar|login", re.I),
+    )
+    return visible_locator(password_input) is not None and visible_locator(login_control) is not None
+
+
 def click_first_visible(page: Page, locators: list, description: str) -> None:
     for locator in locators:
         candidate = visible_locator(locator)
@@ -137,26 +153,44 @@ def login_kometsales(page: Page, user: str, password: str) -> None:
     print(f"Sesión de Kometsales iniciada. URL: {page.url}", flush=True)
 
 
-def open_boxes(page: Page) -> None:
+def open_boxes(page: Page, user: str, password: str) -> None:
     print("Abriendo Inventario > Cajas...", flush=True)
-    try:
-        click_first_visible(
-            page,
-            [
-                page.get_by_role("button", name=re.compile(r"inventario", re.I)),
-                page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
-            ],
-            "Inventario",
-        )
-        page.wait_for_timeout(700)
-        click_text(page, "Cajas")
-        page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
-    except (PlaywrightTimeoutError, RuntimeError):
-        print("Aviso: no se pudo navegar por el menú; abriendo Cajas por su ruta directa.", flush=True)
-        page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
-    wait_for_network(page)
-    page.wait_for_timeout(1_500)
-    capture(page, "01_cajas.png")
+    for attempt in range(1, 3):
+        try:
+            click_first_visible(
+                page,
+                [
+                    page.get_by_role("button", name=re.compile(r"inventario", re.I)),
+                    page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
+                ],
+                "Inventario",
+            )
+            page.wait_for_timeout(700)
+            click_text(page, "Cajas")
+            page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
+        except (PlaywrightTimeoutError, RuntimeError):
+            print("Aviso: no se pudo navegar por el menú; abriendo Cajas por su ruta directa.", flush=True)
+            page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
+        wait_for_network(page)
+        page.wait_for_timeout(1_500)
+
+        if not is_login_page(page):
+            capture(page, "01_cajas.png")
+            return
+
+        capture(page, f"01_cajas_login_{attempt}.png")
+        if attempt == 1:
+            print(
+                "Aviso: Komet redirigió a la pantalla de inicio de sesión al abrir Cajas; "
+                "se volverá a autenticar y se reintentará.",
+                flush=True,
+            )
+            login_kometsales(page, user, password)
+
+    raise RuntimeError(
+        "Komet volvió a la pantalla de inicio de sesión al abrir Cajas después de reintentar. "
+        "No se puede confirmar el inventario ni continuar con la carga."
+    )
 
 
 def download_inventory_export(page: Page, destination: Path) -> bool:
@@ -194,6 +228,10 @@ def download_inventory_export(page: Page, destination: Path) -> bool:
 
 
 def inventory_is_empty(page: Page) -> bool:
+    if is_login_page(page):
+        raise RuntimeError(
+            "Komet mostró la pantalla de inicio de sesión; no se puede determinar si el inventario está vacío."
+        )
     no_records = page.locator("#tdLabelNoRecords")
     if visible_locator(no_records) is not None:
         return True
@@ -540,6 +578,10 @@ def delete_all_inventory(page: Page) -> None:
 
 def upload_boxes(page: Page, workbook_path: Path) -> None:
     print(f"Abriendo Subir XLS cajas: {workbook_path.name}", flush=True)
+    if is_login_page(page):
+        raise RuntimeError(
+            "Komet mostró la pantalla de inicio de sesión antes de abrir Subir XLS cajas."
+        )
     click_first_visible(
         page,
         [
@@ -669,7 +711,7 @@ def run() -> None:
             try:
                 login_kometsales(page, komet_user, komet_password)
                 capture(page, "00_sesion_iniciada.png")
-                open_boxes(page)
+                open_boxes(page, komet_user, komet_password)
                 inventory_downloaded = download_inventory_export(page, komet_inventory_path)
                 if not inventory_downloaded:
                     komet_inventory_path = None
