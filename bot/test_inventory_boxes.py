@@ -78,6 +78,13 @@ class InventoryBoxesTests(unittest.TestCase):
         self.assertFalse(downloaded)
         page.expect_download.assert_not_called()
 
+    def test_login_page_is_not_treated_as_empty_inventory(self):
+        page = MagicMock()
+        page.url = "https://app.kometsales.com/sign-in/login.do#st"
+
+        with self.assertRaisesRegex(RuntimeError, "no se puede determinar si el inventario está vacío"):
+            inventory_boxes.inventory_is_empty(page)
+
     @patch("inventory_boxes.awb_checkbox")
     @patch("inventory_boxes.inventory_is_empty", return_value=False)
     @patch("inventory_boxes.selected_inventory_rows", side_effect=[0, 79])
