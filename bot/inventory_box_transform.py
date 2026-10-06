@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.utils.datetime import from_excel
@@ -17,6 +18,29 @@ from openpyxl.utils.datetime import from_excel
 DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
 KOMET_SHEET_NAME = "Availability"
 AVAILABILITY_TABLE_NAME = "tblAvailability2"
+CUSTOMER_VIEW_SHEET_NAME = "Customer View"
+CUSTOMER_VIEW_DAYS = 7
+
+_CUSTOMER_VIEW_CATEGORY_ORDER = {
+    "ASTER": 10,
+    "ASTERS": 10,
+    "CELOSIA": 20,
+    "GOMPHRENA": 30,
+    "MARIGOLD": 40,
+    "MATRICARIA": 50,
+    "SAFFLOWER": 60,
+    "SNAPDRAGON": 70,
+    "SOLIDAGO": 80,
+    "SUNFLOWER": 90,
+    "UNICORN": 100,
+}
+_CUSTOMER_VIEW_CATEGORY_NAMES = {"ASTER": "ASTERS"}
+_CUSTOMER_VIEW_BOX_TYPES = {
+    "D": "D - 2.93CU",
+    "L": "L - 1.48CU",
+    "H": "H3 - 3.07",
+    "H3": "H3 - 3.07",
+}
 
 
 @dataclass(frozen=True)
@@ -467,6 +491,372 @@ def _numeric_quantity(value: Any) -> float | None:
         return float(str(value).replace(",", "").strip())
     except ValueError:
         return None
+
+
+def _customer_view_category(product: str) -> str:
+    first_word = re.sub(r"\s+.*$", "", product.strip()).upper()
+    return _CUSTOMER_VIEW_CATEGORY_NAMES.get(first_word, first_word)
+
+
+def _customer_view_records(workbook) -> tuple[list[dict[str, Any]], list[date]]:
+    """Build the product/date matrix that is shown to customers.
+
+    Availability is the source of truth.  A product can appear more than once
+    when it has different box types or pack sizes, so those variants remain as
+    separate rows in Customer View.
+    """
+    availability = workbook[KOMET_SHEET_NAME]
+    min_col, min_row, max_col, max_row = _table_bounds(
+        availability, AVAILABILITY_TABLE_NAME
+    )
+    headers = {
+        str(availability.cell(min_row, column).value or "").strip().lower(): column
+        for column in range(min_col, max_col + 1)
+    }
+    required = {
+        "product description",
+        "package type",
+        "pack",
+        "units / pack",
+        "qty packages",
+        "price",
+        "available from",
+    }
+    if not required.issubset(headers):
+        raise RuntimeError(
+            "tblAvailability2 no contiene las columnas necesarias para Customer View: "
+            + ", ".join(sorted(required.difference(headers)))
+            + "."
+        )
+
+    records: dict[tuple[Any, ...], dict[str, Any]] = {}
+    all_dates: set[date] = set()
+    positive_dates: set[date] = set()
+    for row_number in range(min_row + 1, max_row + 1):
+        product = str(
+            availability.cell(row_number, headers["product description"]).value or ""
+        ).strip()
+        available = _as_date(
+            availability.cell(row_number, headers["available from"]).value,
+            epoch=workbook.epoch,
+        )
+        if not product or available is None:
+            continue
+
+        package_type = str(
+            availability.cell(row_number, headers["package type"]).value or ""
+        ).strip().upper()
+        unit_of_sale_column = headers.get("unit of sale")
+        unit_of_sale = str(
+            availability.cell(row_number, unit_of_sale_column).value
+            if unit_of_sale_column
+            else ""
+        ).strip()
+        pack = _numeric_quantity(
+            availability.cell(row_number, headers["pack"]).value
+        )
+        units_per_pack = _numeric_quantity(
+            availability.cell(row_number, headers["units / pack"]).value
+        )
+        price = availability.cell(row_number, headers["price"]).value
+        price_number = _numeric_quantity(price)
+        quantity = _numeric_quantity(
+            availability.cell(row_number, headers["qty packages"]).value
+        ) or 0.0
+        product_key = re.sub(r"\s+", " ", product).casefold()
+        variant_key = (
+            product_key,
+            unit_of_sale.casefold(),
+            package_type,
+            pack,
+            units_per_pack,
+            price_number if price_number is not None else str(price),
+        )
+        record = records.setdefault(
+            variant_key,
+            {
+                "product": product,
+                "category": _customer_view_category(product),
+                "package_type": package_type,
+                "pack": pack,
+                "units_per_pack": units_per_pack,
+                "price": price_number if price_number is not None else price,
+                "quantities": {},
+                "first_row": row_number,
+            },
+        )
+        record["quantities"][available] = (
+            record["quantities"].get(available, 0.0) + quantity
+        )
+        all_dates.add(available)
+        if quantity > 0:
+            positive_dates.add(available)
+
+    if not records or not all_dates:
+        raise RuntimeError("Availability no contiene productos y fechas para Customer View.")
+
+    start_date = min(positive_dates or all_dates)
+    dates = [start_date + timedelta(days=offset) for offset in range(CUSTOMER_VIEW_DAYS)]
+    category_order = max(_CUSTOMER_VIEW_CATEGORY_ORDER.values()) + 1
+    ordered_records = sorted(
+        records.values(),
+        key=lambda record: (
+            _CUSTOMER_VIEW_CATEGORY_ORDER.get(record["category"], category_order),
+            record["category"],
+            record["product"].casefold(),
+            record["first_row"],
+        ),
+    )
+    return ordered_records, dates
+
+
+def _customer_view_style(
+    cell,
+    *,
+    font: Font | None = None,
+    fill: PatternFill | None = None,
+    alignment: Alignment | None = None,
+    border: Border | None = None,
+    number_format: str | None = None,
+) -> None:
+    if font is not None:
+        cell.font = copy(font)
+    if fill is not None:
+        cell.fill = copy(fill)
+    if alignment is not None:
+        cell.alignment = copy(alignment)
+    if border is not None:
+        cell.border = copy(border)
+    if number_format is not None:
+        cell.number_format = number_format
+
+
+def _reset_customer_view_sheet(sheet) -> None:
+    for merged_range in list(sheet.merged_cells.ranges):
+        sheet.unmerge_cells(str(merged_range))
+    max_row = max(sheet.max_row, 1)
+    max_column = max(sheet.max_column, 1)
+    for row in sheet.iter_rows(min_row=1, max_row=max_row, max_col=max_column):
+        for cell in row:
+            cell.value = None
+            cell._style = None
+            cell.comment = None
+            cell.hyperlink = None
+    for table_name in list(sheet.tables):
+        del sheet.tables[table_name]
+    sheet.row_dimensions.clear()
+    sheet.column_dimensions.clear()
+    sheet.freeze_panes = None
+    sheet.auto_filter.ref = None
+    sheet.print_area = None
+    sheet.print_title_rows = None
+    sheet.sheet_view.showGridLines = False
+    if hasattr(sheet, "_images"):
+        sheet._images.clear()
+    if hasattr(sheet, "_charts"):
+        sheet._charts.clear()
+
+
+def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
+    """Replace Customer View with a static, customer-facing Availability matrix."""
+    workbook = load_workbook(workbook_path, data_only=False, keep_links=True)
+    try:
+        if CUSTOMER_VIEW_SHEET_NAME not in workbook.sheetnames:
+            workbook.create_sheet(CUSTOMER_VIEW_SHEET_NAME, 0)
+        sheet = workbook[CUSTOMER_VIEW_SHEET_NAME]
+        records, dates = _customer_view_records(workbook)
+        _reset_customer_view_sheet(sheet)
+
+        dark_green = "FF244C3A"
+        light_green = "FFEEF4EF"
+        date_green = "FFE2EFE5"
+        text_green = "FF24332B"
+        date_text_green = "FF2F6B4A"
+        pale_row = "FFF7FAF8"
+        white = "FFFFFFFF"
+        grid = Side(style="thin", color="FFD8E2DB")
+        row_border = Border(bottom=grid)
+        boxed_border = Border(left=grid, right=grid, top=grid, bottom=grid)
+        title_font = Font(name="Arial", size=20, bold=True, color=white)
+        subtitle_font = Font(name="Arial", size=13, bold=True, color="FFDDE9DF")
+        description_font = Font(name="Arial", size=9, italic=True, color=text_green)
+        header_font = Font(name="Arial", size=9, bold=True, color=white)
+        regular_font = Font(name="Arial", size=9, color=text_green)
+        category_font = Font(name="Arial", size=9, bold=True, color=text_green)
+        legend_font = Font(name="Arial", size=11, bold=True, color="FF000000")
+        centered = Alignment(horizontal="center", vertical="center")
+        wrapped_centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left = Alignment(horizontal="left", vertical="center")
+        title_fill = PatternFill("solid", fgColor=dark_green)
+        description_fill = PatternFill("solid", fgColor=light_green)
+        date_fill = PatternFill("solid", fgColor=date_green)
+        category_fill = PatternFill("solid", fgColor=light_green)
+        alternate_fill = PatternFill("solid", fgColor=pale_row)
+        header_fill = PatternFill("solid", fgColor=dark_green)
+
+        for row_number, value, font, fill in (
+            (1, "PACIFICA FARMS", title_font, title_fill),
+            (2, "FRESH FARM-DIRECT AVAILABILITY", subtitle_font, title_fill),
+            (
+                3,
+                "Fresh-cut flowers available for upcoming delivery dates. Reserve early — availability is limited.",
+                description_font,
+                description_fill,
+            ),
+        ):
+            for column in range(1, 16):
+                _customer_view_style(
+                    sheet.cell(row_number, column),
+                    font=font,
+                    fill=fill,
+                    alignment=centered,
+                )
+            sheet.cell(row_number, 1).value = value
+        sheet.merge_cells("A1:O1")
+        sheet.merge_cells("A2:O2")
+        sheet.merge_cells("A3:O3")
+        sheet.row_dimensions[1].height = 28
+        sheet.row_dimensions[2].height = 22
+        sheet.row_dimensions[3].height = 19
+
+        sheet["G6"] = "Boxes available by Truck Load Date"
+        _customer_view_style(sheet["G6"], font=regular_font, alignment=centered)
+        sheet.merge_cells("G6:M6")
+        weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        for offset, available in enumerate(dates, start=7):
+            weekday_cell = sheet.cell(7, offset)
+            weekday_cell.value = weekdays[available.weekday()]
+            _customer_view_style(weekday_cell, font=regular_font, alignment=centered)
+
+        headers = ("PRODUCT CATEGORY", "Stm/bch", "Bch/Box", "Box Type", "FOB Price")
+        for column, value in enumerate(headers, start=1):
+            cell = sheet.cell(8, column)
+            cell.value = value
+            _customer_view_style(
+                cell, font=header_font, fill=header_fill, alignment=left if column == 1 else centered
+            )
+        _customer_view_style(sheet["F8"], fill=header_fill)
+        for column, available in enumerate(dates, start=7):
+            cell = sheet.cell(8, column)
+            cell.value = available
+            _customer_view_style(
+                cell,
+                font=Font(name="Arial", size=9, color=date_text_green),
+                fill=date_fill,
+                alignment=centered,
+                number_format=r"d\-mmm",
+            )
+        sheet.row_dimensions[8].height = 20
+
+        row_number = 9
+        current_category = None
+        product_index = 0
+        for record in records:
+            category = record["category"]
+            if category != current_category:
+                current_category = category
+                for column in range(1, 14):
+                    _customer_view_style(
+                        sheet.cell(row_number, column),
+                        font=category_font,
+                        fill=category_fill,
+                        alignment=centered,
+                    )
+                sheet.cell(row_number, 4).value = category
+                sheet.merge_cells(f"D{row_number}:F{row_number}")
+                sheet.row_dimensions[row_number].height = 17
+                row_number += 1
+
+            product_index += 1
+            values = (
+                record["product"],
+                record["pack"],
+                record["units_per_pack"],
+                _CUSTOMER_VIEW_BOX_TYPES.get(
+                    record["package_type"], record["package_type"] or ""
+                ),
+                record["price"],
+            )
+            for column, value in enumerate(values, start=1):
+                cell = sheet.cell(row_number, column)
+                cell.value = value
+                _customer_view_style(
+                    cell,
+                    font=regular_font,
+                    fill=alternate_fill if product_index % 2 == 0 else PatternFill(),
+                    alignment=left if column in (1, 4) else centered,
+                    border=row_border,
+                    number_format='$#,##0.00' if column == 5 else None,
+                )
+            for column, available in enumerate(dates, start=7):
+                quantity = record["quantities"].get(available, 0.0)
+                display_quantity: Any = int(quantity) if quantity.is_integer() else quantity
+                if quantity <= 0:
+                    display_quantity = "—"
+                cell = sheet.cell(row_number, column)
+                cell.value = display_quantity
+                _customer_view_style(
+                    cell,
+                    font=regular_font,
+                    fill=alternate_fill if product_index % 2 == 0 else PatternFill(),
+                    alignment=centered,
+                    border=row_border,
+                )
+            row_number += 1
+
+        legend_row = row_number + 1
+        legend_values = (
+            ("Boxes", None, "LxWxH\nBox Size", None, "Cu."),
+            ("F3 (D Box)", "Dry", "40x16x08", None, 2.96),
+            ("F4 (L Box)", "Dry", "40x08x08", None, 1.48),
+            ("H3 Hamper (H34)", "Wet", "13x13x34", None, 3.07),
+        )
+        for offset, values in enumerate(legend_values):
+            current_row = legend_row + offset
+            for column, value in enumerate(values, start=1):
+                cell = sheet.cell(current_row, column)
+                cell.value = value
+                _customer_view_style(
+                    cell,
+                    font=legend_font,
+                    alignment=wrapped_centered if column == 3 else (left if column in (1, 2) else centered),
+                    border=boxed_border,
+                    number_format="0.00" if column == 5 else None,
+                )
+            sheet.merge_cells(f"C{current_row}:D{current_row}")
+            sheet.row_dimensions[current_row].height = 26 if offset == 0 else 21
+        sheet.row_dimensions[legend_row].height = 32
+
+        widths = {"A": 42, "B": 9, "C": 9, "D": 17, "E": 11, "F": 3}
+        for column in range(7, 14):
+            widths[get_column_letter(column)] = 10
+        widths.update({"N": 2, "O": 2})
+        for column, width in widths.items():
+            sheet.column_dimensions[column].width = width
+        sheet.freeze_panes = "A10"
+        sheet.sheet_properties.pageSetUpPr.fitToPage = True
+        sheet.page_setup.orientation = "landscape"
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.print_area = f"A1:M{legend_row + len(legend_values) - 1}"
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+        workbook.save(workbook_path)
+    finally:
+        workbook.close()
+
+    verification = load_workbook(workbook_path, data_only=False, read_only=True)
+    try:
+        customer_view = verification[CUSTOMER_VIEW_SHEET_NAME]
+        if any(
+            _is_formula_cell_value(cell.value)
+            for row in customer_view.iter_rows()
+            for cell in row
+        ):
+            raise RuntimeError("Customer View conserva fórmulas después de reconstruirse.")
+    finally:
+        verification.close()
+    return len(records)
 
 
 def _inventory_rows(workbook, sheet_name: str, *, table_name: str | None = None) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
