@@ -15,6 +15,7 @@ try:
         apply_inventory_rules,
         create_inventory_email_workbook,
         create_single_sheet_workbook,
+        rebuild_customer_view_from_availability,
         transform_inventory_workbook,
         refresh_workbook_with_komet_inventory,
 )
@@ -25,6 +26,7 @@ except ImportError:
             apply_inventory_rules,
             create_inventory_email_workbook,
             create_single_sheet_workbook,
+            rebuild_customer_view_from_availability,
             transform_inventory_workbook,
             refresh_workbook_with_komet_inventory,
         )
@@ -33,6 +35,7 @@ except ImportError:
         create_single_sheet_workbook = None
         DATE_NUMBER_FORMAT = None
         create_inventory_email_workbook = None
+        rebuild_customer_view_from_availability = None
         transform_inventory_workbook = None
         refresh_workbook_with_komet_inventory = None
 try:
@@ -261,6 +264,62 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result["Customer View"]["A2"].value, 15)
                 self.assertTrue(result["Customer View"]["A2"].font.bold)
                 self.assertEqual(result["Inventory"]["A1"].value, "Inventory")
+            finally:
+                result.close()
+
+    def test_rebuilds_customer_view_from_availability_as_static_customer_matrix(self) -> None:
+        self.assertIsNotNone(rebuild_customer_view_from_availability)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            customer["A1"] = "old formula layout"
+            availability = workbook.create_sheet("Availability")
+            availability.append(
+                [
+                    "Vendor Name",
+                    "Product Description",
+                    "Unit of Sale",
+                    "Package Type",
+                    "Pack",
+                    "Units / Pack",
+                    "Qty Packages",
+                    "Price",
+                    "Available From",
+                ]
+            )
+            availability.append(["Pacific", "Aster Purple Bonita", "Bunch", "D", 6, 12, 2, 3.95, date(2026, 10, 9)])
+            availability.append(["Pacific", "Aster Purple Bonita", "Bunch", "D", 6, 12, 3, 3.95, date(2026, 10, 10)])
+            availability.append(["Pacific", "Aster Purple Bonita", "Bunch", "D", 6, 12, 0, 3.95, date(2026, 10, 11)])
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I5"))
+            workbook.create_sheet("Inventory")
+            workbook.save(source)
+            workbook.close()
+
+            variants = rebuild_customer_view_from_availability(source)
+
+            result = load_workbook(source, data_only=False)
+            try:
+                customer = result["Customer View"]
+                self.assertEqual(variants, 2)
+                self.assertEqual(customer["A1"].value, "PACIFICA FARMS")
+                self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
+                self.assertEqual(customer["H8"].value.date(), date(2026, 10, 10))
+                self.assertEqual(customer["G10"].value, 2)
+                self.assertEqual(customer["H10"].value, 3)
+                self.assertEqual(customer["I10"].value, "—")
+                self.assertEqual(customer["A12"].value, "Marigold Orange")
+                self.assertEqual(customer["D9"].value, "ASTERS")
+                self.assertEqual(customer.freeze_panes, "A10")
+                self.assertFalse(
+                    any(
+                        isinstance(cell.value, str) and cell.value.startswith("=")
+                        for row in customer.iter_rows()
+                        for cell in row
+                    )
+                )
             finally:
                 result.close()
 

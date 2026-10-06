@@ -13,7 +13,6 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sy
 from sharepoint_sync import (
     download_sharepoint_file,
     graph_token,
-    read_calculated_worksheet_values,
     resolve_sharepoint_item_by_url,
     upload_sharepoint_file,
 )
@@ -21,6 +20,7 @@ from email_sender import load_email_config, send_report_email
 from inventory_box_transform import (
     create_inventory_email_workbook,
     create_single_sheet_workbook,
+    rebuild_customer_view_from_availability,
     refresh_workbook_with_komet_inventory,
     transform_inventory_workbook,
 )
@@ -660,6 +660,12 @@ def prepare_workbook_with_inventory_and_dates(
             destination,
             assumed_today=assumed_today,
         )
+        if destination.exists():
+            customer_view_products = rebuild_customer_view_from_availability(destination)
+            print(
+                f"Customer View reconstruida desde Availability: {customer_view_products} variantes.",
+                flush=True,
+            )
         return inventory_result, date_result
     finally:
         inventory_stage.unlink(missing_ok=True)
@@ -719,7 +725,7 @@ def run() -> None:
                 upload_sharepoint_file(sharepoint_token, sharepoint_item, source_path)
                 print(
                     "Información del Excel actualizada en el mismo archivo de SharePoint; "
-                    "Inventory fue reemplazada y se conservaron Availability y Customer View.",
+                    "Inventory fue reemplazada, Availability fue depurada y Customer View fue reconstruida.",
                     flush=True,
                 )
                 create_single_sheet_workbook(source_path, komet_upload_path)
@@ -729,11 +735,6 @@ def run() -> None:
                     create_inventory_email_workbook(
                         source_path,
                         email_attachment_path,
-                        customer_view_values=read_calculated_worksheet_values(
-                            sharepoint_token,
-                            sharepoint_item,
-                            "Customer View",
-                        ),
                     )
                     email_attachment_ready = True
                     print(
