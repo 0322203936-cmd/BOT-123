@@ -56,7 +56,7 @@ def run() -> None:
         try:
             login_kometsales(page, komet_user, komet_password)
             capture(page, "ofrecer_00_sesion_iniciada.png")
-            open_boxes(page)
+            open_boxes(page, komet_user, komet_password)
             capture(page, "ofrecer_01_inventario_actual.png")
 
             # delete_all_inventory ya contempla el caso en que Komet está vacío:
