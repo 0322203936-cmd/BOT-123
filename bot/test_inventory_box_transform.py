@@ -384,6 +384,34 @@ class InventoryBoxTransformTests(unittest.TestCase):
             finally:
                 result.close()
 
+    def test_ignores_formatted_blank_columns_after_availability_data(self) -> None:
+        self.assertIsNotNone(transform_inventory_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "output.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Availability"
+            sheet.append(["Product Description", "Available From"])
+            sheet.append(["A", date(2026, 9, 14)])
+            sheet["D2"].fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+            sheet["D3"].fill = PatternFill(fill_type="solid", fgColor="00FF00")
+            workbook.save(source)
+            workbook.close()
+
+            transform_inventory_workbook(
+                source,
+                output,
+                assumed_today=self.assumed_today,
+            )
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result["Availability"]["A3"].value, "A")
+                self.assertEqual(result["Availability"]["B3"].value.date(), date(2026, 9, 15))
+            finally:
+                result.close()
+
     def test_replaces_inventory_and_updates_availability_without_increasing_qty(self) -> None:
         self.assertIsNotNone(refresh_workbook_with_komet_inventory)
         with TemporaryDirectory() as temp_dir:

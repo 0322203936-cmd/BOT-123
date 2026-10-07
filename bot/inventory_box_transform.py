@@ -444,7 +444,11 @@ def _verify_saved_workbook(
                 raise RuntimeError(
                     f"No se encontró la fila base retenida para la fila nueva {row_index}."
                 )
-            for column in range(1, sheet.max_column + 1):
+            # Availability's data ends at Available From. Some SharePoint
+            # copies keep formatted blank columns after it, and those cells
+            # can legitimately have a different style on a newly appended
+            # row even when all real data columns were copied correctly.
+            for column in range(1, date_column + 2):
                 if sheet.cell(row_index, column)._style != sheet.cell(source_row, column)._style:
                     raise RuntimeError(
                         f"El formato de la fila nueva {row_index} no coincide con su fila base."
