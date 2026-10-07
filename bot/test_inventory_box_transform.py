@@ -260,10 +260,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
 
             result = load_workbook(output, data_only=False)
             try:
-                self.assertEqual(result.sheetnames, ["Customer View", "Inventory"])
+                self.assertEqual(result.sheetnames, ["Customer View"])
                 self.assertEqual(result["Customer View"]["A2"].value, 15)
                 self.assertTrue(result["Customer View"]["A2"].font.bold)
-                self.assertEqual(result["Inventory"]["A1"].value, "Inventory")
+                self.assertNotIn("Inventory", result.sheetnames)
             finally:
                 result.close()
 
@@ -293,7 +293,9 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Pacific", "Aster Purple Bonita", "Bunch", "D", 6, 12, 3, 3.95, date(2026, 10, 10)])
             availability.append(["Pacific", "Aster Purple Bonita", "Bunch", "D", 6, 12, 0, 3.95, date(2026, 10, 11)])
             availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, 9)])
-            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I5"))
+            for day in range(12, 20):
+                availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, day)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I13"))
             workbook.create_sheet("Inventory")
             workbook.save(source)
             workbook.close()
@@ -307,9 +309,12 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(customer["A1"].value, "PACIFICA FARMS")
                 self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
                 self.assertEqual(customer["H8"].value.date(), date(2026, 10, 10))
+                self.assertEqual(customer["I8"].value.date(), date(2026, 10, 12))
+                self.assertEqual(customer["P8"].value.date(), date(2026, 10, 19))
                 self.assertEqual(customer["G10"].value, 2)
                 self.assertEqual(customer["H10"].value, 3)
                 self.assertEqual(customer["I10"].value, "—")
+                self.assertEqual(customer["P10"].value, "—")
                 self.assertEqual(customer["A12"].value, "Marigold Orange")
                 self.assertEqual(customer["D9"].value, "ASTERS")
                 self.assertEqual(customer.freeze_panes, "A10")

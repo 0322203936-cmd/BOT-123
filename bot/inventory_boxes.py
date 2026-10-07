@@ -738,8 +738,8 @@ def run() -> None:
                     )
                     email_attachment_ready = True
                     print(
-                        "Correo preparado con Inventory y Customer View como valores; "
-                        "Availability no se incluye.",
+                        "Correo preparado únicamente con Customer View como valores; "
+                        "Availability, Inventory y Order Form no se incluyen.",
                         flush=True,
                     )
                 print(f"Proceso completo. URL final: {page.url}", flush=True)
