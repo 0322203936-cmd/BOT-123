@@ -673,32 +673,33 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         layout_end_letter = get_column_letter(layout_end_column)
         date_end_letter = get_column_letter(date_end_column)
 
-        dark_green = "FF244C3A"
-        light_green = "FFEEF4EF"
-        date_green = "FFE2EFE5"
-        text_green = "FF24332B"
-        date_text_green = "FF2F6B4A"
-        pale_row = "FFF7FAF8"
+        navy = "FF074C73"
+        teal = "FF0E5C7A"
+        cream = "FFFAF2E5"
+        orange = "FFFFB84C"
+        brown = "FF664935"
+        pale_cream = "FFFFF8ED"
         white = "FFFFFFFF"
-        grid = Side(style="thin", color="FFD8E2DB")
+        grid = Side(style="thin", color="FFE3D1B8")
         row_border = Border(bottom=grid)
         boxed_border = Border(left=grid, right=grid, top=grid, bottom=grid)
-        title_font = Font(name="Arial", size=20, bold=True, color=white)
-        subtitle_font = Font(name="Arial", size=13, bold=True, color="FFDDE9DF")
-        description_font = Font(name="Arial", size=9, italic=True, color=text_green)
-        header_font = Font(name="Arial", size=9, bold=True, color=white)
-        regular_font = Font(name="Arial", size=9, color=text_green)
-        category_font = Font(name="Arial", size=9, bold=True, color=text_green)
-        legend_font = Font(name="Arial", size=11, bold=True, color="FF000000")
+        title_font = Font(name="The Seasons", size=20, bold=True, color=white)
+        subtitle_font = Font(name="Lora", size=13, bold=True, color=cream)
+        description_font = Font(name="Lora", size=9, italic=True, color=brown)
+        header_font = Font(name="Lora", size=9, bold=True, color=white)
+        regular_font = Font(name="Lora", size=9, color=brown)
+        category_font = Font(name="Lora", size=9, bold=True, color=navy)
+        legend_font = Font(name="Lora", size=11, bold=True, color=brown)
         centered = Alignment(horizontal="center", vertical="center")
         wrapped_centered = Alignment(horizontal="center", vertical="center", wrap_text=True)
         left = Alignment(horizontal="left", vertical="center")
-        title_fill = PatternFill("solid", fgColor=dark_green)
-        description_fill = PatternFill("solid", fgColor=light_green)
-        date_fill = PatternFill("solid", fgColor=date_green)
-        category_fill = PatternFill("solid", fgColor=light_green)
-        alternate_fill = PatternFill("solid", fgColor=pale_row)
-        header_fill = PatternFill("solid", fgColor=dark_green)
+        title_fill = PatternFill("solid", fgColor=navy)
+        description_fill = PatternFill("solid", fgColor=cream)
+        date_fill = PatternFill("solid", fgColor=orange)
+        category_fill = PatternFill("solid", fgColor=cream)
+        alternate_fill = PatternFill("solid", fgColor=pale_cream)
+        header_fill = PatternFill("solid", fgColor=teal)
+        sheet.sheet_properties.tabColor = navy
 
         for row_number, value, font, fill in (
             (1, "PACIFICA FARMS", title_font, title_fill),
@@ -748,7 +749,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
             cell.value = available
             _customer_view_style(
                 cell,
-                font=Font(name="Arial", size=9, color=date_text_green),
+                font=Font(name="Lora", size=9, bold=True, color=navy),
                 fill=date_fill,
                 alignment=centered,
                 number_format=r"d\-mmm",

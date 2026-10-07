@@ -307,7 +307,11 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 customer = result["Customer View"]
                 self.assertEqual(variants, 2)
                 self.assertEqual(customer["A1"].value, "PACIFICA FARMS")
+                self.assertEqual(customer["A1"].font.name, "The Seasons")
+                self.assertEqual(customer["A1"].fill.fgColor.rgb, "FF074C73")
                 self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
+                self.assertEqual(customer["G8"].fill.fgColor.rgb, "FFFFB84C")
+                self.assertEqual(customer["A10"].font.name, "Lora")
                 self.assertEqual(customer["H8"].value.date(), date(2026, 10, 10))
                 self.assertEqual(customer["I8"].value.date(), date(2026, 10, 12))
                 self.assertEqual(customer["P8"].value.date(), date(2026, 10, 19))
