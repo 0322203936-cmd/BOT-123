@@ -682,7 +682,10 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         _reset_customer_view_sheet(sheet)
         date_start_column = 7
         date_end_column = date_start_column + len(dates) - 1
-        layout_end_column = max(15, date_end_column)
+        # Keep the presentation width tied to the actual availability dates.
+        # Do not paint blank columns beyond the last date; those columns should
+        # appear only when future dates are actually present.
+        layout_end_column = max(6, date_end_column)
         layout_end_letter = get_column_letter(layout_end_column)
         date_end_letter = get_column_letter(date_end_column)
 

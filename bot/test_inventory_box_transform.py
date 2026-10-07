@@ -424,6 +424,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 ]
                 self.assertIn("Marigold Orange", values)
                 self.assertNotIn("Celosia Orange", values)
+                self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
+                self.assertIsNone(customer["H8"].value)
+                self.assertIsNone(customer["H8"].fill.fill_type)
+                self.assertIsNone(customer["H9"].fill.fill_type)
             finally:
                 result.close()
 
