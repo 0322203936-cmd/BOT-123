@@ -19,7 +19,6 @@ DATE_NUMBER_FORMAT = r"yyyy\-mm\-dd"
 KOMET_SHEET_NAME = "Availability"
 AVAILABILITY_TABLE_NAME = "tblAvailability2"
 CUSTOMER_VIEW_SHEET_NAME = "Customer View"
-CUSTOMER_VIEW_DAYS = 7
 
 _CUSTOMER_VIEW_CATEGORY_ORDER = {
     "ASTER": 10,
@@ -595,8 +594,10 @@ def _customer_view_records(workbook) -> tuple[list[dict[str, Any]], list[date]]:
     if not records or not all_dates:
         raise RuntimeError("Availability no contiene productos y fechas para Customer View.")
 
-    start_date = min(positive_dates or all_dates)
-    dates = [start_date + timedelta(days=offset) for offset in range(CUSTOMER_VIEW_DAYS)]
+    # Customer View must expose every date with available boxes. Availability
+    # remains the source of truth; dates with no positive quantity are not
+    # customer-facing availability dates.
+    dates = sorted(positive_dates or all_dates)
     category_order = max(_CUSTOMER_VIEW_CATEGORY_ORDER.values()) + 1
     ordered_records = sorted(
         records.values(),
@@ -666,6 +667,11 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         sheet = workbook[CUSTOMER_VIEW_SHEET_NAME]
         records, dates = _customer_view_records(workbook)
         _reset_customer_view_sheet(sheet)
+        date_start_column = 7
+        date_end_column = date_start_column + len(dates) - 1
+        layout_end_column = max(15, date_end_column)
+        layout_end_letter = get_column_letter(layout_end_column)
+        date_end_letter = get_column_letter(date_end_column)
 
         dark_green = "FF244C3A"
         light_green = "FFEEF4EF"
@@ -704,7 +710,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                 description_fill,
             ),
         ):
-            for column in range(1, 16):
+            for column in range(1, layout_end_column + 1):
                 _customer_view_style(
                     sheet.cell(row_number, column),
                     font=font,
@@ -712,18 +718,19 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                     alignment=centered,
                 )
             sheet.cell(row_number, 1).value = value
-        sheet.merge_cells("A1:O1")
-        sheet.merge_cells("A2:O2")
-        sheet.merge_cells("A3:O3")
+        sheet.merge_cells(f"A1:{layout_end_letter}1")
+        sheet.merge_cells(f"A2:{layout_end_letter}2")
+        sheet.merge_cells(f"A3:{layout_end_letter}3")
         sheet.row_dimensions[1].height = 28
         sheet.row_dimensions[2].height = 22
         sheet.row_dimensions[3].height = 19
 
         sheet["G6"] = "Boxes available by Truck Load Date"
         _customer_view_style(sheet["G6"], font=regular_font, alignment=centered)
-        sheet.merge_cells("G6:M6")
+        if date_end_column > date_start_column:
+            sheet.merge_cells(f"G6:{date_end_letter}6")
         weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-        for offset, available in enumerate(dates, start=7):
+        for offset, available in enumerate(dates, start=date_start_column):
             weekday_cell = sheet.cell(7, offset)
             weekday_cell.value = weekdays[available.weekday()]
             _customer_view_style(weekday_cell, font=regular_font, alignment=centered)
@@ -736,7 +743,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                 cell, font=header_font, fill=header_fill, alignment=left if column == 1 else centered
             )
         _customer_view_style(sheet["F8"], fill=header_fill)
-        for column, available in enumerate(dates, start=7):
+        for column, available in enumerate(dates, start=date_start_column):
             cell = sheet.cell(8, column)
             cell.value = available
             _customer_view_style(
@@ -755,7 +762,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
             category = record["category"]
             if category != current_category:
                 current_category = category
-                for column in range(1, 14):
+                for column in range(1, layout_end_column + 1):
                     _customer_view_style(
                         sheet.cell(row_number, column),
                         font=category_font,
@@ -788,7 +795,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                     border=row_border,
                     number_format='$#,##0.00' if column == 5 else None,
                 )
-            for column, available in enumerate(dates, start=7):
+            for column, available in enumerate(dates, start=date_start_column):
                 quantity = record["quantities"].get(available, 0.0)
                 display_quantity: Any = int(quantity) if quantity.is_integer() else quantity
                 if quantity <= 0:
@@ -828,9 +835,8 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         sheet.row_dimensions[legend_row].height = 32
 
         widths = {"A": 42, "B": 9, "C": 9, "D": 17, "E": 11, "F": 3}
-        for column in range(7, 14):
+        for column in range(date_start_column, date_end_column + 1):
             widths[get_column_letter(column)] = 10
-        widths.update({"N": 2, "O": 2})
         for column, width in widths.items():
             sheet.column_dimensions[column].width = width
         sheet.freeze_panes = "A10"
@@ -838,7 +844,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         sheet.page_setup.orientation = "landscape"
         sheet.page_setup.fitToWidth = 1
         sheet.page_setup.fitToHeight = 0
-        sheet.print_area = f"A1:M{legend_row + len(legend_values) - 1}"
+        sheet.print_area = f"A1:{layout_end_letter}{legend_row + len(legend_values) - 1}"
         workbook.calculation.fullCalcOnLoad = True
         workbook.calculation.forceFullCalc = True
         workbook.save(workbook_path)
