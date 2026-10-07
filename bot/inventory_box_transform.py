@@ -595,7 +595,16 @@ def _customer_view_records(workbook) -> tuple[list[dict[str, Any]], list[date]]:
         if quantity > 0:
             positive_dates.add(available)
 
-    if not records or not all_dates:
+    # Customer View must contain only variants with at least one real box.
+    # A variant can have zero quantity on some dates and still remain when it
+    # has a positive quantity on another date; remove it only when every date
+    # for that variant is zero.
+    records = {
+        key: record
+        for key, record in records.items()
+        if any(quantity > 0 for quantity in record["quantities"].values())
+    }
+    if not records or not positive_dates:
         raise RuntimeError("Availability no contiene productos y fechas para Customer View.")
 
     # Customer View must expose every date with available boxes. Availability

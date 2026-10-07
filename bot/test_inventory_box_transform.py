@@ -295,7 +295,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, 9)])
             for day in range(12, 20):
                 availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, day)])
-            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I13"))
+            availability.append(["Pacific", "Celosia Orange", "Bunch", "D", 10, 10, 0, 5.20, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I14"))
             workbook.create_sheet("Inventory")
             workbook.save(source)
             workbook.close()
@@ -381,6 +382,48 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A4"].value, "A")
                 self.assertEqual(result.active["A5"].value, "B")
                 self.assertEqual(result.active["A5"]._style, result.active["A3"]._style)
+            finally:
+                result.close()
+
+    def test_omits_customer_view_variants_with_no_positive_quantities(self) -> None:
+        self.assertIsNotNone(rebuild_customer_view_from_availability)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append(
+                [
+                    "Vendor Name",
+                    "Product Description",
+                    "Unit of Sale",
+                    "Package Type",
+                    "Pack",
+                    "Units / Pack",
+                    "Qty Packages",
+                    "Price",
+                    "Available From",
+                ]
+            )
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 2, 3.10, date(2026, 10, 9)])
+            availability.append(["Pacific", "Celosia Orange", "Bunch", "D", 10, 10, 0, 5.20, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I3"))
+            workbook.save(source)
+            workbook.close()
+
+            variants = rebuild_customer_view_from_availability(source)
+
+            result = load_workbook(source, data_only=False)
+            try:
+                customer = result["Customer View"]
+                self.assertEqual(variants, 1)
+                values = [
+                    customer.cell(row=row, column=1).value
+                    for row in range(1, customer.max_row + 1)
+                ]
+                self.assertIn("Marigold Orange", values)
+                self.assertNotIn("Celosia Orange", values)
             finally:
                 result.close()
 
