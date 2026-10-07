@@ -1031,8 +1031,14 @@ def refresh_workbook_with_komet_inventory(
                 old_inventory_totals,
                 assumed_today,
             )
-            inventory_quantity = new_inventory_totals.get((product_key, available), 0.0)
-            final_quantity = min(current, inventory_quantity)
+            if komet_inventory_path is None:
+                # Si Komet no tiene cajas para exportar, no hay una fuente nueva
+                # con la que se pueda reducir Availability. Conservamos la
+                # cantidad actual para evitar convertir el inventario en cero.
+                final_quantity = current
+            else:
+                inventory_quantity = new_inventory_totals.get((product_key, available), 0.0)
+                final_quantity = min(current, inventory_quantity)
             before_total += current
             after_total += final_quantity
             if final_quantity != current:

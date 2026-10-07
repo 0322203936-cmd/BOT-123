@@ -467,12 +467,16 @@ class InventoryBoxTransformTests(unittest.TestCase):
             )
             preserved = load_workbook(preserved_output, data_only=False)
             try:
-                self.assertEqual([preserved["Availability"][f"G{row}"].value for row in (2, 3, 4)], [8, 0, 4])
+                self.assertEqual([preserved["Availability"][f"G{row}"].value for row in (2, 3, 4)], [8, 3, 4])
                 self.assertEqual(preserved["Inventory"]["I9"].value, 8)
                 self.assertEqual(preserved["Inventory"].tables["tblInventory"].ref, "A8:I10")
             finally:
                 preserved.close()
             self.assertEqual(preserved_result.inventory_rows, 2)
+            self.assertEqual(preserved_result.updated_rows, 0)
+            self.assertEqual(preserved_result.decreased_rows, 0)
+            self.assertEqual(preserved_result.before_total, 15)
+            self.assertEqual(preserved_result.after_total, 15)
 
 
 if __name__ == "__main__":
