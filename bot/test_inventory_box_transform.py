@@ -260,10 +260,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
 
             result = load_workbook(output, data_only=False)
             try:
-                self.assertEqual(result.sheetnames, ["Customer View", "Inventory"])
+                self.assertEqual(result.sheetnames, ["Customer View"])
                 self.assertEqual(result["Customer View"]["A2"].value, 15)
                 self.assertTrue(result["Customer View"]["A2"].font.bold)
-                self.assertEqual(result["Inventory"]["A1"].value, "Inventory")
+                self.assertNotIn("Inventory", result.sheetnames)
             finally:
                 result.close()
 

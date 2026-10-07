@@ -1243,10 +1243,10 @@ def create_inventory_email_workbook(
     *,
     customer_view_values: Mapping[str, Any] | None = None,
 ) -> None:
-    """Create the Cajas email workbook with Inventory and static Customer View values."""
+    """Create the Cajas email workbook with only static Customer View values."""
     workbook = load_workbook(source_path, data_only=False, keep_links=True)
     try:
-        required_sheets = {"Inventory", "Customer View"}
+        required_sheets = {"Customer View"}
         missing_sheets = required_sheets.difference(workbook.sheetnames)
         if missing_sheets:
             missing = ", ".join(sorted(missing_sheets))
@@ -1290,7 +1290,7 @@ def create_inventory_email_workbook(
     try:
         if set(verification.sheetnames) != required_sheets:
             raise RuntimeError(
-                "El correo de Cajas debe contener únicamente Inventory y Customer View."
+                "El correo de Cajas debe contener únicamente Customer View."
             )
         customer_view = verification["Customer View"]
         if any(
