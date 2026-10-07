@@ -608,7 +608,11 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
         ],
         "Subir archivo de cajas",
     )
-    success = re.compile(r"(subid|cargad|exitos|correctamente|procesad)", re.I)
+    success = re.compile(
+        r"(éxito|exito|subid|cargad|exitos|correctamente|procesad|programad|"
+        r"notificaci[oó]n.*(?:correo|finalice))",
+        re.I,
+    )
     try:
         page.get_by_text(success).first.wait_for(state="visible", timeout=20_000)
     except PlaywrightTimeoutError as exc:
@@ -728,7 +732,11 @@ def run() -> None:
                     "Inventory fue reemplazada, Availability fue depurada y Customer View fue reconstruida.",
                     flush=True,
                 )
-                create_single_sheet_workbook(source_path, komet_upload_path)
+                create_single_sheet_workbook(
+                    source_path,
+                    komet_upload_path,
+                    normalize_available_from_dates=True,
+                )
                 delete_all_inventory(page)
                 upload_boxes(page, komet_upload_path)
                 if email_config:
