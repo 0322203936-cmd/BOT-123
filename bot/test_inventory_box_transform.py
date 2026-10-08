@@ -379,9 +379,12 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 mixed_row = category_rows["MIXED BOXES"]
                 self.assertEqual(
                     [customer.cell(row=row, column=1).value for row in range(greens_row + 1, mixed_row)],
-                    ["Greens Sampler", "Myrtle Green 60cm", "Parvifolia Green 50cm"],
+                    ["Myrtle Green 60cm", "Parvifolia Green 50cm"],
                 )
-                self.assertEqual(customer.cell(row=mixed_row + 1, column=1).value, "Day of Dead Sampler")
+                self.assertEqual(
+                    [customer.cell(row=row, column=1).value for row in range(mixed_row + 1, mixed_row + 3)],
+                    ["Day of Dead Sampler", "Greens Sampler"],
+                )
             finally:
                 result.close()
 

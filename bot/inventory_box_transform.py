@@ -37,7 +37,7 @@ _CUSTOMER_VIEW_CATEGORY_ORDER = {
 }
 _CUSTOMER_VIEW_CATEGORY_NAMES = {"ASTER": "ASTERS"}
 _CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES = {
-    "greens sampler": "GREENS",
+    "greens sampler": "MIXED BOXES",
     "myrtle green 60cm": "GREENS",
     "parvifolia green 50cm": "GREENS",
     "day of dead sampler": "MIXED BOXES",
