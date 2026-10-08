@@ -417,8 +417,29 @@ def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
         flush=True,
     )
     deadline = monotonic() + UPLOAD_VERIFY_WAIT_MS / 1_000
+    refresh_from_menu = True
     while monotonic() < deadline:
-        page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
+        if refresh_from_menu:
+            try:
+                click_first_visible(
+                    page,
+                    [
+                        page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                        page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                        page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
+                    ],
+                    "Cajas para actualizar el inventario",
+                )
+                page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
+            except (PlaywrightTimeoutError, RuntimeError):
+                print(
+                    "Aviso: no se pudo actualizar Cajas mediante el menú; se abrirá la ruta directa.",
+                    flush=True,
+                )
+                page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
+            refresh_from_menu = False
+        else:
+            page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(1_500)
         wait_for_network(page, timeout=30_000)
         if not inventory_is_empty(page):
