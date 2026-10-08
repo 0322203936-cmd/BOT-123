@@ -7,7 +7,6 @@ from pathlib import Path
 from time import monotonic
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from openpyxl import load_workbook
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from sharepoint_sync import (
@@ -43,26 +42,6 @@ SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
 INVENTORY_READY_WAIT_MS = 120_000
-def configured_wait_ms(name: str, default: int) -> int:
-    value = os.environ.get(name, "").strip()
-    if not value:
-        return default
-    try:
-        milliseconds = int(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{name} debe ser un número entero en milisegundos.") from exc
-    if milliseconds <= 0:
-        raise RuntimeError(f"{name} debe ser mayor que cero.")
-    return milliseconds
-
-
-# Komet puede aceptar el XLS y procesarlo de forma asíncrona durante varios
-# minutos. El límite anterior de 3 minutos podía marcar como fallida una carga
-# que terminaba correctamente poco después, impidiendo preparar y enviar el
-# correo. Se permite ajustarlo desde el entorno para no tener que modificar el
-# código si Komet vuelve a tardar más.
-UPLOAD_VERIFY_WAIT_MS = configured_wait_ms("KOMET_UPLOAD_VERIFY_WAIT_MS", 600_000)
-UPLOAD_VERIFY_POLL_MS = 5_000
 SELECTION_RETRY_ATTEMPTS = 3
 
 
@@ -364,92 +343,30 @@ def wait_for_inventory_ready(page: Page) -> None:
     )
 
 
-def workbook_has_positive_availability(workbook_path: Path) -> bool:
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+def refresh_boxes_after_upload(page: Page) -> None:
+    """Refresh Cajas once without blocking the email on asynchronous processing."""
     try:
-        if "Availability" not in workbook.sheetnames:
-            raise RuntimeError("El archivo preparado no contiene la pestaña Availability.")
-        worksheet = workbook["Availability"]
-        quantity_column = None
-        header_row = None
-        for row in worksheet.iter_rows(min_row=1, max_row=min(20, worksheet.max_row)):
-            headers = {
-                str(cell.value or "").strip().casefold(): cell.column
-                for cell in row
-                if cell.value not in (None, "")
-            }
-            if "qty packages" in headers:
-                quantity_column = headers["qty packages"]
-                header_row = row[0].row
-                break
-        if quantity_column is None or header_row is None:
-            raise RuntimeError("El archivo preparado no contiene la columna Qty Packages.")
-        for row in worksheet.iter_rows(
-            min_row=header_row + 1,
-            min_col=quantity_column,
-            max_col=quantity_column,
-            values_only=True,
-        ):
-            value = row[0]
-            if isinstance(value, bool) or value in (None, ""):
-                continue
-            try:
-                if float(str(value).replace(",", "").strip()) > 0:
-                    return True
-            except ValueError:
-                continue
-        return False
-    finally:
-        workbook.close()
-
-
-def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
-    if not workbook_has_positive_availability(workbook_path):
+        click_first_visible(
+            page,
+            [
+                page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
+            ],
+            "Cajas para actualizar el inventario",
+        )
+        page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
+    except (PlaywrightTimeoutError, RuntimeError):
         print(
-            "Availability no contiene cantidades mayores que cero; se espera que Komet quede vacío.",
+            "Aviso: no se pudo actualizar Cajas mediante el menú; se abrirá la ruta directa.",
             flush=True,
         )
-        return
-
-    wait_minutes = UPLOAD_VERIFY_WAIT_MS / 60_000
+        page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
+    page.wait_for_timeout(3_000)
     print(
-        f"Esperando que Komet refleje la carga hasta {wait_minutes:g} minutos...",
+        "Carga de Komet aceptada; la actualización de la tabla continuará en segundo plano. "
+        "No se bloqueará el correo esperando a que aparezcan las cajas.",
         flush=True,
-    )
-    deadline = monotonic() + UPLOAD_VERIFY_WAIT_MS / 1_000
-    refresh_from_menu = True
-    while monotonic() < deadline:
-        if refresh_from_menu:
-            try:
-                click_first_visible(
-                    page,
-                    [
-                        page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
-                        page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
-                        page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
-                    ],
-                    "Cajas para actualizar el inventario",
-                )
-                page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
-            except (PlaywrightTimeoutError, RuntimeError):
-                print(
-                    "Aviso: no se pudo actualizar Cajas mediante el menú; se abrirá la ruta directa.",
-                    flush=True,
-                )
-                page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
-            refresh_from_menu = False
-        else:
-            page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(1_500)
-        wait_for_network(page, timeout=30_000)
-        if not inventory_is_empty(page):
-            print("Komet confirmó que ya aparecen cajas después de procesar el XLS.", flush=True)
-            return
-        page.wait_for_timeout(UPLOAD_VERIFY_POLL_MS)
-
-    raise RuntimeError(
-        f"Komet programó el XLS, pero no mostró cajas después de esperar {wait_minutes:g} minutos. "
-        "No se marcará la carga como completada."
     )
 
 
@@ -685,12 +602,15 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
         if any(visible_locator(locator) is not None for locator in error_candidates):
             raise RuntimeError("Kometsales mostró un error después de intentar cargar el XLS.") from exc
         print(
-            "Aviso: Kometsales no mostró el aviso de programación; se verificará la tabla de cajas.",
+            "Aviso: Kometsales no mostró el aviso de programación; se continuará porque no mostró un error.",
             flush=True,
         )
-    wait_for_uploaded_inventory(page, workbook_path)
-    capture(page, "04_carga_completada.png")
-    print("XLS de cajas cargado correctamente en Kometsales.", flush=True)
+    refresh_boxes_after_upload(page)
+    capture(page, "04_carga_programada.png")
+    print(
+        "XLS de cajas programado correctamente en Kometsales; se continuará con el correo.",
+        flush=True,
+    )
 
 
 def current_local_date() -> date:
