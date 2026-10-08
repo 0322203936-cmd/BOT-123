@@ -90,6 +90,14 @@ def visible_locator(locator) -> object | None:
     return None
 
 
+def first_visible_locator(locators: list) -> object | None:
+    for locator in locators:
+        found = visible_locator(locator)
+        if found is not None:
+            return found
+    return None
+
+
 def is_login_page(page: Page) -> bool:
     """Return True when Komet redirected the browser back to its login page."""
     try:
@@ -187,7 +195,7 @@ def open_boxes(page: Page, user: str, password: str) -> None:
             # Después de iniciar sesión Komet suele dejar Inventario ya
             # desplegado. Volver a hacer clic ahí lo contrae y oculta Cajas.
             # Solo abrir el menú cuando Cajas todavía no está visible.
-            if visible_locator(boxes_menu) is None:
+            if first_visible_locator(boxes_menu) is None:
                 click_first_visible(page, inventory_menu, "Inventario")
                 page.wait_for_timeout(700)
             click_first_visible(page, boxes_menu, "Cajas")
