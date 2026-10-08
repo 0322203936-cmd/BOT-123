@@ -41,19 +41,24 @@ jobs:
           KOMET_PICK_TICKET_EMAIL: ${{ secrets.KOMET_PICK_TICKET_EMAIL }}
           KOMET_LABELS_EMAIL: ${{ secrets.KOMET_LABELS_EMAIL }}
           KOMET_TIMEZONE: America/Tijuana
+          KOMET_ORDER_DETAILS_EMAIL: Irene.Machain@Pacifica-farms.com
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
         run: python -u bot/facturas_komet.py
 
-      - name: Guardar bitácora de facturas enviadas
+      - name: Guardar bitácoras de documentos enviados
         if: ${{ success() && env.KOMET_EMAIL_MODE == 'send' }}
         run: |
-          if [ -z "$(git status --porcelain -- bot/data/facturas_enviadas.json)" ]; then
-            echo "No hay nuevas facturas enviadas para registrar."
+          if [ -z "$(git status --porcelain -- bot/data/facturas_enviadas.json bot/data/detalles_exportacion_enviados.json)" ]; then
+            echo "No hay nuevos documentos enviados para registrar."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bot/data/facturas_enviadas.json
-          git commit -m "Registrar facturas Komet enviadas [skip ci]"
+          git add bot/data/facturas_enviadas.json bot/data/detalles_exportacion_enviados.json
+          git commit -m "Registrar documentos Komet enviados [skip ci]"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Guardar imágenes de evidencia
