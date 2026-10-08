@@ -697,6 +697,7 @@ def download_and_prepare_source(komet_inventory_path: Path | None) -> tuple[str,
         f"total_antes={inventory_result.before_total:g} total_despues={inventory_result.after_total:g} "
         f"formulas_reemplazadas={inventory_result.formula_cells_replaced} "
         f"filas_eliminadas={date_result.removed_rows} filas_agregadas={date_result.added_rows} "
+        f"cajas_trasladadas={date_result.carried_boxes:g} "
         f"domingos_finales={date_result.final_sunday_rows} "
         f"fechas_inmediatas_finales={date_result.final_immediate_rows}",
         flush=True,
