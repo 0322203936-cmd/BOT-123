@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from html import escape
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
+import xlrd
 
 
 KOMET_LOGIN_URL = "https://app.kometsales.com/sign-in/login.do#st"
@@ -18,6 +20,10 @@ SUMMARY_PATH = ARTIFACTS_DIR / "summary.json"
 SENT_ORDERS_PATH = Path(
     os.environ.get("KOMET_SENT_ORDERS_PATH", "bot/data/facturas_enviadas.json")
 )
+SENT_EXPORT_DETAILS_PATH = Path(
+    os.environ.get("KOMET_SENT_EXPORT_DETAILS_PATH", "bot/data/detalles_exportacion_enviados.json")
+)
+ORDER_DETAILS_DIR = ARTIFACTS_DIR / "detalles_exportacion"
 DEFAULT_TIMEZONE = "America/Tijuana"
 DEFAULT_TIMEOUT_MS = 60_000
 ORDER_CODE_PATTERN = re.compile(r"\b(?:K2K\s*)?\d{6}\b|\b[A-Z]{1,3}\d{6}\b", re.I)
@@ -104,6 +110,61 @@ def save_sent_order_keys(keys: set[str], path: Path = SENT_ORDERS_PATH) -> None:
         "sent_orders": sorted(keys),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def parse_export_details(path: Path) -> dict[str, str]:
+    """Read the labeled header of Komet's Order Details BIFF8 XLS."""
+    workbook = xlrd.open_workbook(str(path))
+    sheet = workbook.sheet_by_name("Order Details") if "Order Details" in workbook.sheet_names() else workbook.sheet_by_index(0)
+    labels = {
+        "order number": "Order Number",
+        "customer": "Customer",
+        "ship date": "Ship Date",
+        "carrier": "Carrier",
+        "location": "Location",
+        "created on": "Created on",
+    }
+    values: dict[str, str] = {}
+    for row_index in range(min(sheet.nrows, 20)):
+        if sheet.ncols < 2:
+            break
+        label = normalize_space(str(sheet.cell_value(row_index, 0))).rstrip(":").casefold()
+        field = labels.get(label)
+        if field:
+            cell = sheet.cell(row_index, 1)
+            if cell.ctype == xlrd.XL_CELL_DATE:
+                value = xlrd.xldate_as_datetime(cell.value, workbook.datemode).strftime("%m/%d/%Y")
+            elif cell.ctype == xlrd.XL_CELL_NUMBER and cell.value.is_integer():
+                value = str(int(cell.value))
+            else:
+                value = normalize_space(str(cell.value))
+            values[field] = value
+    missing = [field for field in labels.values() if not values.get(field)]
+    if missing:
+        raise RuntimeError(f"El detalle de exportación no contiene: {', '.join(missing)}.")
+    return values
+
+
+def export_details_email_config(details: dict[str, str], recipient: str) -> dict:
+    order_number = details["Order Number"]
+    rows = "".join(
+        "<tr><th style='text-align:left;padding:6px 14px 6px 0'>"
+        f"{escape(label)}:</th><td style='padding:6px 0'>{escape(details[label])}</td></tr>"
+        for label in ("Order Number", "Customer", "Ship Date", "Carrier", "Location", "Created on")
+    )
+    return {
+        "recipients": [recipient],
+        "cc": [],
+        "bcc": [],
+        "subject": f"Nueva Orden Komet: {order_number}",
+        "bodyHtml": f"<p>Nueva Orden Komet: {escape(order_number)}</p><table>{rows}</table>",
+        "logoUrl": "",
+        "logoData": "",
+        "logoName": "",
+        "logoContentType": "",
+        "logoSharePoint": None,
+        "pdfSharePoint": None,
+    }
 
 
 def komet_dates() -> tuple[date, date]:
@@ -426,6 +487,76 @@ def process_order(page: Page, order: dict[str, str], index: int, mode: str) -> d
     }
 
 
+def download_export_details(page: Page, order: dict[str, str], index: int) -> Path:
+    """Open this order's own Actions menu and download its export details."""
+    internal_id = order["internal_id"]
+    row = page.locator(f"#gridResults tr:has(#{order['checkbox_id']})").first
+    row.scroll_into_view_if_needed()
+    row_checkbox = row.locator(f"#{order['checkbox_id']}")
+    if not row_checkbox.is_checked():
+        row_checkbox.check(force=True)
+    row.hover()
+    action_span = page.locator(f".spnActions{internal_id}, #spnActions{internal_id}")
+    more_actions = page.locator(f"#buttonContext{internal_id}")
+    for target in [action_span, row.locator("td").last, row]:
+        try:
+            if target.count() > 0:
+                target.hover()
+                page.wait_for_timeout(250)
+        except Exception:
+            continue
+        if visible_locator(more_actions) is not None:
+            break
+    more_actions.wait_for(state="visible", timeout=15_000)
+    more_actions.click()
+    detail_menu = page.get_by_text(
+        re.compile(r"^\s*(?:Detalles del pedido de exportación|Export Order Details)\s*$", re.I)
+    )
+    with page.expect_download(timeout=45_000) as download_info:
+        click_first_visible(page, [detail_menu], "Detalles del pedido de exportación")
+    ORDER_DETAILS_DIR.mkdir(parents=True, exist_ok=True)
+    destination = ORDER_DETAILS_DIR / f"{index:03d}_{safe_filename(order['order'])}.xls"
+    download_info.value.save_as(str(destination))
+    print(f"Detalle de exportación descargado: {destination}", flush=True)
+    return destination
+
+
+def send_export_details_email(path: Path, details: dict[str, str], recipient: str) -> None:
+    # The shared Graph sender is reused without changing the inventory-boxes bot.
+    from email_sender import send_report_email
+
+    send_report_email(export_details_email_config(details, recipient), required_secret("MAIL_SENDER"), path)
+
+
+def process_export_details(
+    page: Page,
+    order: dict[str, str],
+    index: int,
+    key: str,
+    recipient: str,
+    sent_keys: set[str],
+) -> dict[str, str]:
+    if key in sent_keys:
+        return {**order, "order_key": key, "status": "omitido_ya_enviado"}
+    path = download_export_details(page, order, index)
+    details = parse_export_details(path)
+    selected_number = re.search(r"\d{6}", order["order"])
+    downloaded_number = re.search(r"\d{6}", details["Order Number"]) or re.fullmatch(
+        r"\d{1,6}", details["Order Number"]
+    )
+    if selected_number and (
+        not downloaded_number or selected_number.group() != downloaded_number.group().zfill(6)
+    ):
+        raise RuntimeError(
+            f"El XLS descargado es de la orden {details['Order Number']}, no de {order['order']}."
+        )
+    send_export_details_email(path, details, recipient)
+    sent_keys.add(key)
+    save_sent_order_keys(sent_keys, SENT_EXPORT_DETAILS_PATH)
+    print(f"Detalle de {order['order']} enviado a {recipient} y registrado.", flush=True)
+    return {**order, "order_key": key, "status": "enviado", "attachment": path.name}
+
+
 def run() -> None:
     mode = os.environ.get("KOMET_EMAIL_MODE", "cancel").strip().lower()
     if mode not in {"cancel", "send"}:
@@ -437,6 +568,8 @@ def run() -> None:
     password = required_secret("KOMET_PASSWORD")
     from_date, until_date = komet_dates()
     sent_order_keys = load_sent_order_keys()
+    details_recipient = os.environ.get("KOMET_ORDER_DETAILS_EMAIL", "").strip()
+    details_enabled = mode == "send" and bool(details_recipient)
     summary = {
         "mode": mode,
         "timezone": os.environ.get("KOMET_TIMEZONE", DEFAULT_TIMEZONE),
@@ -444,6 +577,8 @@ def run() -> None:
         "orden_hasta": format_komet_date(until_date),
         "sent_orders_file": str(SENT_ORDERS_PATH),
         "orders": [],
+        "export_details_file": str(SENT_EXPORT_DETAILS_PATH),
+        "export_details": [],
     }
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -500,16 +635,69 @@ def run() -> None:
                 if not click_next_page(page):
                     break
 
+            # This is a separate pass so downloads cannot disturb the existing
+            # Factura / Pick Ticket / Etiquetas flow or its duplicate ledger.
+            if details_enabled:
+                try:
+                    sent_export_detail_keys = load_sent_order_keys(SENT_EXPORT_DETAILS_PATH)
+                    fill_order_dates(page, from_date, until_date)
+                    search_orders(page)
+                    detail_pages: set[tuple[str, ...]] = set()
+                    detail_index = 1
+                    for _page_number in range(1, 101):
+                        rows = collect_order_rows(page)
+                        if not rows or page_signature(rows) in detail_pages:
+                            break
+                        detail_pages.add(page_signature(rows))
+                        for order in rows:
+                            current_index = detail_index
+                            detail_index += 1
+                            key = order_key(order)
+                            if key not in sent_order_keys:
+                                continue
+                            try:
+                                summary["export_details"].append(
+                                    process_export_details(
+                                        page, order, current_index, key, details_recipient, sent_export_detail_keys
+                                    )
+                                )
+                            except Exception as error:
+                                summary["export_details"].append(
+                                    {**order, "order_key": key, "status": "error", "error": str(error)}
+                                )
+                                print(f"No se envió el detalle de {order['order']}: {error}", flush=True)
+                                try:
+                                    capture(page, f"{current_index:03d}_{safe_filename(order['order'])}_98_detalle_error.png")
+                                except Exception:
+                                    pass
+                        if not click_next_page(page):
+                            break
+                except Exception as error:
+                    summary["export_details"].append({"status": "error", "error": str(error)})
+                    print(f"No se completó la etapa de detalles de exportación: {error}", flush=True)
+
             summary["total"] = len(summary["orders"])
             summary["cancelled"] = sum(item.get("status") == "cancelado" for item in summary["orders"])
             summary["sent"] = sum(item.get("status") == "enviado" for item in summary["orders"])
             summary["skipped"] = sum(item.get("status") == "omitido_ya_enviado" for item in summary["orders"])
             summary["errors"] = sum(item.get("status") == "error" for item in summary["orders"])
+            summary["export_details_sent"] = sum(
+                item.get("status") == "enviado" for item in summary["export_details"]
+            )
+            summary["export_details_errors"] = sum(
+                item.get("status") == "error" for item in summary["export_details"]
+            )
             print(
                 f"Proceso terminado: {summary['sent']} enviadas, "
                 f"{summary['cancelled']} canceladas y {summary['skipped']} omitidas.",
                 flush=True,
             )
+            if details_enabled:
+                print(
+                    f"Detalles de exportación: {summary['export_details_sent']} enviados, "
+                    f"{summary['export_details_errors']} pendientes por error.",
+                    flush=True,
+                )
         except Exception:
             try:
                 capture(page, "999_error_general.png")
