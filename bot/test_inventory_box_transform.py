@@ -333,6 +333,58 @@ class InventoryBoxTransformTests(unittest.TestCase):
             finally:
                 result.close()
 
+    def test_rebuilds_customer_view_with_explicit_greens_and_mixed_boxes_categories(self) -> None:
+        self.assertIsNotNone(rebuild_customer_view_from_availability)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append(
+                [
+                    "Vendor Name",
+                    "Product Description",
+                    "Unit of Sale",
+                    "Package Type",
+                    "Pack",
+                    "Units / Pack",
+                    "Qty Packages",
+                    "Price",
+                    "Available From",
+                ]
+            )
+            # Deliberately interleave the categories in Availability.
+            availability.append(["Pacific", "Day of Dead Sampler", "Bunch", "L", 10, 80, 1, 39.5, date(2026, 10, 9)])
+            availability.append(["Pacific", "Myrtle Green 60cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.append(["Pacific", "Greens Sampler", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.append(["Pacific", "Parvifolia Green 50cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I5"))
+            workbook.save(source)
+            workbook.close()
+
+            variants = rebuild_customer_view_from_availability(source)
+
+            result = load_workbook(source, data_only=False)
+            try:
+                customer = result["Customer View"]
+                self.assertEqual(variants, 4)
+                category_rows = {
+                    customer.cell(row=row, column=4).value: row
+                    for row in range(9, customer.max_row + 1)
+                    if customer.cell(row=row, column=4).value in {"GREENS", "MIXED BOXES"}
+                }
+                self.assertEqual(list(category_rows), ["GREENS", "MIXED BOXES"])
+                greens_row = category_rows["GREENS"]
+                mixed_row = category_rows["MIXED BOXES"]
+                self.assertEqual(
+                    [customer.cell(row=row, column=1).value for row in range(greens_row + 1, mixed_row)],
+                    ["Greens Sampler", "Myrtle Green 60cm", "Parvifolia Green 50cm"],
+                )
+                self.assertEqual(customer.cell(row=mixed_row + 1, column=1).value, "Day of Dead Sampler")
+            finally:
+                result.close()
+
     def test_keeps_the_second_sheet_in_the_full_transformed_workbook(self) -> None:
         self.assertIsNotNone(transform_inventory_workbook)
         with TemporaryDirectory() as temp_dir:

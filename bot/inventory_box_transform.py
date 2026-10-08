@@ -32,8 +32,16 @@ _CUSTOMER_VIEW_CATEGORY_ORDER = {
     "SOLIDAGO": 80,
     "SUNFLOWER": 90,
     "UNICORN": 100,
+    "GREENS": 110,
+    "MIXED BOXES": 120,
 }
 _CUSTOMER_VIEW_CATEGORY_NAMES = {"ASTER": "ASTERS"}
+_CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES = {
+    "greens sampler": "GREENS",
+    "myrtle green 60cm": "GREENS",
+    "parvifolia green 50cm": "GREENS",
+    "day of dead sampler": "MIXED BOXES",
+}
 _CUSTOMER_VIEW_BOX_TYPES = {
     "D": "D - 2.93CU",
     "L": "L - 1.48CU",
@@ -497,6 +505,9 @@ def _numeric_quantity(value: Any) -> float | None:
 
 
 def _customer_view_category(product: str) -> str:
+    normalized_product = re.sub(r"\s+", " ", product.strip()).casefold()
+    if normalized_product in _CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES:
+        return _CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES[normalized_product]
     first_word = re.sub(r"\s+.*$", "", product.strip()).upper()
     return _CUSTOMER_VIEW_CATEGORY_NAMES.get(first_word, first_word)
 
