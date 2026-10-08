@@ -173,18 +173,24 @@ def login_kometsales(page: Page, user: str, password: str) -> None:
 
 def open_boxes(page: Page, user: str, password: str) -> None:
     print("Abriendo Inventario > Cajas...", flush=True)
+    inventory_menu = [
+        page.get_by_role("button", name=re.compile(r"inventario", re.I)),
+        page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
+    ]
+    boxes_menu = [
+        page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+        page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+        page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
+    ]
     for attempt in range(1, 3):
         try:
-            click_first_visible(
-                page,
-                [
-                    page.get_by_role("button", name=re.compile(r"inventario", re.I)),
-                    page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
-                ],
-                "Inventario",
-            )
-            page.wait_for_timeout(700)
-            click_text(page, "Cajas")
+            # Después de iniciar sesión Komet suele dejar Inventario ya
+            # desplegado. Volver a hacer clic ahí lo contrae y oculta Cajas.
+            # Solo abrir el menú cuando Cajas todavía no está visible.
+            if visible_locator(boxes_menu) is None:
+                click_first_visible(page, inventory_menu, "Inventario")
+                page.wait_for_timeout(700)
+            click_first_visible(page, boxes_menu, "Cajas")
             page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
         except (PlaywrightTimeoutError, RuntimeError):
             print("Aviso: no se pudo navegar por el menú; abriendo Cajas por su ruta directa.", flush=True)
