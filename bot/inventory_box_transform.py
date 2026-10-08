@@ -812,6 +812,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                 row_number += 1
 
             product_index += 1
+            product_fill = alternate_fill if product_index % 2 == 0 else PatternFill()
             values = (
                 record["product"],
                 record["pack"],
@@ -827,7 +828,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                 _customer_view_style(
                     cell,
                     font=regular_font,
-                    fill=alternate_fill if product_index % 2 == 0 else PatternFill(),
+                    fill=product_fill,
                     alignment=left if column in (1, 4) else centered,
                     border=row_border,
                     number_format='$#,##0.00' if column == 5 else None,
@@ -842,7 +843,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
                 _customer_view_style(
                     cell,
                     font=regular_font,
-                    fill=alternate_fill if product_index % 2 == 0 else PatternFill(),
+                    fill=product_fill,
                     alignment=centered,
                     border=row_border,
                 )
