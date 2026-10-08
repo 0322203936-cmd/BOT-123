@@ -4,6 +4,7 @@ from copy import copy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import math
 import re
 from typing import Any, Mapping, Sequence
 
@@ -40,6 +41,7 @@ _CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES = {
     "greens sampler": "MIXED BOXES",
     "myrtle green 60cm": "GREENS",
     "parvifolia green 50cm": "GREENS",
+    "honey bracelet green 60cm": "GREENS",
     "day of dead sampler": "MIXED BOXES",
 }
 _CUSTOMER_VIEW_BOX_TYPES = {
@@ -753,10 +755,17 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
         sheet.row_dimensions[2].height = 22
         sheet.row_dimensions[3].height = 19
 
-        sheet["G6"] = "Boxes available by Truck Load Date"
-        _customer_view_style(sheet["G6"], font=regular_font, alignment=centered)
+        title = "Boxes available by Truck Load Date"
+        title_lines = math.ceil(len(title) / (12 * max(1, len(dates))))
+        sheet["G6"] = title
+        _customer_view_style(
+            sheet["G6"],
+            font=regular_font,
+            alignment=Alignment(horizontal="center", vertical="center", wrap_text=True),
+        )
         if date_end_column > date_start_column:
             sheet.merge_cells(f"G6:{date_end_letter}6")
+        sheet.row_dimensions[6].height = max(24, title_lines * 13 + 6)
         weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
         for offset, available in enumerate(dates, start=date_start_column):
             weekday_cell = sheet.cell(7, offset)

@@ -312,6 +312,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(customer["A1"].fill.fgColor.rgb, "FF074C73")
                 self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
                 self.assertEqual(customer["G8"].fill.fgColor.rgb, "FFFFB84C")
+                self.assertEqual(customer["G6"].value, "Boxes available by Truck Load Date")
+                self.assertTrue(customer["G6"].alignment.wrap_text)
+                self.assertIn("G6:P6", {str(rng) for rng in customer.merged_cells.ranges})
+                self.assertGreaterEqual(customer.row_dimensions[6].height, 24)
                 self.assertEqual(customer["A10"].font.name, "Lora")
                 self.assertEqual(customer["H8"].value.date(), date(2026, 10, 10))
                 self.assertEqual(customer["I8"].value.date(), date(2026, 10, 12))
@@ -359,7 +363,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Pacific", "Myrtle Green 60cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
             availability.append(["Pacific", "Greens Sampler", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
             availability.append(["Pacific", "Parvifolia Green 50cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
-            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I5"))
+            availability.append(["Pacific", "Honey Bracelet Green 60cm", "Bunch", "L", 15, 12, 2, 4.6, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I6"))
             workbook.save(source)
             workbook.close()
 
@@ -368,7 +373,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
             result = load_workbook(source, data_only=False)
             try:
                 customer = result["Customer View"]
-                self.assertEqual(variants, 4)
+                self.assertEqual(variants, 5)
+                self.assertEqual(customer["G6"].value, "Boxes available by Truck Load Date")
+                self.assertTrue(customer["G6"].alignment.wrap_text)
+                self.assertGreaterEqual(customer.row_dimensions[6].height, 45)
                 category_rows = {
                     customer.cell(row=row, column=4).value: row
                     for row in range(9, customer.max_row + 1)
@@ -379,7 +387,7 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 mixed_row = category_rows["MIXED BOXES"]
                 self.assertEqual(
                     [customer.cell(row=row, column=1).value for row in range(greens_row + 1, mixed_row)],
-                    ["Myrtle Green 60cm", "Parvifolia Green 50cm"],
+                    ["Honey Bracelet Green 60cm", "Myrtle Green 60cm", "Parvifolia Green 50cm"],
                 )
                 self.assertEqual(
                     [customer.cell(row=row, column=1).value for row in range(mixed_row + 1, mixed_row + 3)],
