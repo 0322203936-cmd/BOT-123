@@ -66,6 +66,7 @@ class InventoryTransformResult:
     original_rows: int
     removed_rows: int
     added_rows: int
+    carried_boxes: float
     product_count: int
     final_sunday_rows: int
     final_immediate_rows: int
@@ -198,6 +199,7 @@ def apply_inventory_rules(
     product_column: int,
     date_column: int,
     assumed_today: date,
+    quantity_column: int | None = None,
     epoch: Any = None,
 ) -> InventoryTransformResult:
     """Apply the inventory-box date rules to row values.
@@ -211,8 +213,27 @@ def apply_inventory_rules(
     blank_rows: list[OutputRow] = []
     product_order: list[str] = []
     seen_products: set[str] = set()
-    latest_by_product: dict[str, tuple[date, int, tuple[Any, ...]]] = {}
+    carried: dict[tuple[Any, ...], tuple[float, int, tuple[Any, ...]]] = {}
     removed_rows = 0
+
+    def quantity(values: tuple[Any, ...]) -> float:
+        if quantity_column is None:
+            return 0.0
+        raw = values[quantity_column] if quantity_column < len(values) else None
+        amount = _numeric_quantity(raw)
+        if amount is None and raw not in (None, ""):
+            raise RuntimeError(f"Qty Packages contiene una cantidad inválida: {raw!r}.")
+        if amount is not None and amount < 0:
+            raise RuntimeError(f"Qty Packages contiene una cantidad negativa: {raw!r}.")
+        if amount is not None and not math.isfinite(amount):
+            raise RuntimeError(f"Qty Packages contiene una cantidad no finita: {raw!r}.")
+        return amount or 0.0
+
+    def variant(values: tuple[Any, ...]) -> tuple[Any, ...]:
+        return tuple(
+            value for index, value in enumerate(values)
+            if index not in (date_column, quantity_column)
+        )
 
     for source_index, raw_row in enumerate(rows):
         values = tuple(raw_row)
@@ -231,6 +252,7 @@ def apply_inventory_rules(
             if date_column < len(values)
             else None
         )
+        amount = quantity(values)
 
         if available is not None and (
             available < assumed_today
@@ -238,18 +260,58 @@ def apply_inventory_rules(
             or assumed_today <= available <= window_end
         ):
             removed_rows += 1
+            if quantity_column is not None and assumed_today <= available <= window_end and amount > 0:
+                key = variant(values)
+                previous = carried.get(key)
+                carried[key] = (
+                    amount + (previous[0] if previous else 0.0),
+                    source_index,
+                    values,
+                )
             continue
 
         retained.append(OutputRow(source_index, values))
-        if not product:
-            continue
-        if available is None:
+
+    first_safe_date = next_business_day(window_end)
+    retained_by_variant = {
+        variant(row.values): index
+        for index, row in enumerate(retained)
+        if quantity_column is not None
+        and date_column < len(row.values)
+        and _as_date(row.values[date_column], epoch=epoch) == first_safe_date
+    }
+    for key, (amount, source_index, source_values) in carried.items():
+        existing_index = retained_by_variant.get(key)
+        if existing_index is not None:
+            existing = retained[existing_index]
+            updated = list(existing.values)
+            updated[quantity_column] = quantity(existing.values) + amount
+            retained[existing_index] = OutputRow(
+                existing.source_index, tuple(updated), is_added=existing.is_added
+            )
+        else:
+            updated = list(source_values)
+            updated[date_column] = first_safe_date
+            updated[quantity_column] = amount
+            retained_by_variant[key] = len(retained)
+            retained.append(OutputRow(source_index, tuple(updated), is_added=True))
+
+    latest_by_product: dict[str, tuple[date, int, tuple[Any, ...]]] = {}
+    for row in retained:
+        values = row.values
+        product = str(values[product_column]).strip() if product_column < len(values) and values[product_column] is not None else ""
+        available = _as_date(values[date_column], epoch=epoch) if date_column < len(values) else None
+        if not product or available is None:
             continue
         previous = latest_by_product.get(product)
         if previous is None or available >= previous[0]:
-            latest_by_product[product] = (available, source_index, values)
+            latest_by_product[product] = (available, row.source_index, values)
 
-    missing_products = [product for product in product_order if product not in latest_by_product]
+    # A product sold out in Komet may have no row left after the date cleanup.
+    missing_products = (
+        [product for product in product_order if product not in latest_by_product]
+        if quantity_column is None else []
+    )
     if missing_products:
         joined = ", ".join(missing_products)
         raise RuntimeError(
@@ -260,17 +322,33 @@ def apply_inventory_rules(
     additions: list[OutputRow] = []
     copied_data_correct = True
     for product in product_order:
+        if product not in latest_by_product:
+            continue
         latest_date, source_index, source_values = latest_by_product[product]
+        if quantity_column is not None and (
+            quantity(source_values) <= 0
+            or any(
+                row.values[product_column] == product
+                and _as_date(row.values[date_column], epoch=epoch) == latest_date
+                and quantity(row.values) == 0
+                for row in retained
+                if product_column < len(row.values) and date_column < len(row.values)
+            )
+        ):
+            continue
         new_values = list(source_values)
         new_date = next_business_day(latest_date)
         new_values[date_column] = new_date
+        if quantity_column is not None:
+            # The extra future row is a placeholder, not a second offer of the same boxes.
+            new_values[quantity_column] = 0
         additions.append(
             OutputRow(source_index, tuple(new_values), is_added=True)
         )
         copied_data_correct = copied_data_correct and all(
             _same_value(source_values[index], new_values[index], date_value=index == date_column)
             for index in range(len(source_values))
-            if index != date_column
+            if index not in (date_column, quantity_column)
         )
 
     output_rows = tuple(retained + additions + blank_rows)
@@ -292,6 +370,7 @@ def apply_inventory_rules(
         original_rows=original_rows,
         removed_rows=removed_rows,
         added_rows=len(additions),
+        carried_boxes=sum(amount for amount, _, _ in carried.values()),
         product_count=len(product_order),
         final_sunday_rows=final_sunday_rows,
         final_immediate_rows=final_immediate_rows,
@@ -451,9 +530,8 @@ def _verify_saved_workbook(
                 continue
             source_row = source_target_rows.get(expected_row.source_index)
             if source_row is None:
-                raise RuntimeError(
-                    f"No se encontró la fila base retenida para la fila nueva {row_index}."
-                )
+                # A carried row can be styled from a removed source row.
+                continue
             # Availability's data ends at Available From. Some SharePoint
             # copies keep formatted blank columns after it, and those cells
             # can legitimately have a different style on a newly appended
@@ -1054,6 +1132,7 @@ def refresh_workbook_with_komet_inventory(
         updated_rows = 0
         decreased_rows = 0
         formula_cells_replaced = 0
+        allocated_by_product_date: dict[tuple[str, date], float] = {}
         for row_number in range(availability_header_row + 1, availability_max_row + 1):
             product = availability.cell(row_number, availability_headers["product description"]).value
             available_value = availability.cell(row_number, availability_headers["available from"]).value
@@ -1076,6 +1155,8 @@ def refresh_workbook_with_komet_inventory(
             else:
                 inventory_quantity = new_inventory_totals.get((product_key, available), 0.0)
                 final_quantity = min(current, inventory_quantity)
+                key = (product_key, available)
+                allocated_by_product_date[key] = allocated_by_product_date.get(key, 0.0) + final_quantity
             before_total += current
             after_total += final_quantity
             if final_quantity != current:
@@ -1087,6 +1168,14 @@ def refresh_workbook_with_komet_inventory(
             ):
                 formula_cells_replaced += 1
             current_cell.value = int(final_quantity) if final_quantity.is_integer() else final_quantity
+
+        for key, allocated in allocated_by_product_date.items():
+            if allocated > new_inventory_totals.get(key, 0.0) + 1e-9:
+                raise RuntimeError(
+                    "Komet no distingue las variantes de este producto y fecha; "
+                    "no se pueden repartir las cajas restantes sin duplicarlas: "
+                    f"{key[0]!r}, {key[1]}."
+                )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
@@ -1161,6 +1250,13 @@ def transform_inventory_workbook(
     try:
         sheet = _komet_sheet(workbook)
         header_row, product_column, date_column = _header_columns(sheet)
+        headers = {
+            str(cell.value or "").strip().lower(): cell.column - 1
+            for cell in sheet[header_row]
+        }
+        if AVAILABILITY_TABLE_NAME in sheet.tables and "qty packages" not in headers:
+            raise RuntimeError("Availability no contiene la columna Qty Packages.")
+        quantity_column = headers.get("qty packages")
         data_start = header_row + 1
         original_max_row = sheet.max_row
         max_column = sheet.max_column
@@ -1174,6 +1270,7 @@ def transform_inventory_workbook(
             product_column=product_column,
             date_column=date_column,
             assumed_today=assumed_today,
+            quantity_column=quantity_column,
             epoch=workbook.epoch,
         )
 
@@ -1194,6 +1291,18 @@ def transform_inventory_workbook(
         for row in range(final_row + 1, original_max_row + 1):
             for column in range(1, max_column + 1):
                 sheet.cell(row, column).value = None
+
+        if AVAILABILITY_TABLE_NAME in sheet.tables:
+            table = sheet.tables[AVAILABILITY_TABLE_NAME]
+            min_col, min_row, max_col, table_end = range_boundaries(table.ref)
+            data_end = data_start + sum(not row.is_blank for row in result.output_rows) - 1
+            if data_end > table_end:
+                table.ref = (
+                    f"{get_column_letter(min_col)}{min_row}:"
+                    f"{get_column_letter(max_col)}{data_end}"
+                )
+                if table.autoFilter is not None:
+                    table.autoFilter.ref = table.ref
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         workbook.save(output_path)
