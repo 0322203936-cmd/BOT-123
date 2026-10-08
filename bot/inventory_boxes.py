@@ -43,7 +43,25 @@ SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
 INVENTORY_READY_WAIT_MS = 120_000
-UPLOAD_VERIFY_WAIT_MS = 180_000
+def configured_wait_ms(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return default
+    try:
+        milliseconds = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} debe ser un número entero en milisegundos.") from exc
+    if milliseconds <= 0:
+        raise RuntimeError(f"{name} debe ser mayor que cero.")
+    return milliseconds
+
+
+# Komet puede aceptar el XLS y procesarlo de forma asíncrona durante varios
+# minutos. El límite anterior de 3 minutos podía marcar como fallida una carga
+# que terminaba correctamente poco después, impidiendo preparar y enviar el
+# correo. Se permite ajustarlo desde el entorno para no tener que modificar el
+# código si Komet vuelve a tardar más.
+UPLOAD_VERIFY_WAIT_MS = configured_wait_ms("KOMET_UPLOAD_VERIFY_WAIT_MS", 600_000)
 UPLOAD_VERIFY_POLL_MS = 5_000
 SELECTION_RETRY_ATTEMPTS = 3
 
@@ -379,6 +397,11 @@ def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
         )
         return
 
+    wait_minutes = UPLOAD_VERIFY_WAIT_MS / 60_000
+    print(
+        f"Esperando que Komet refleje la carga hasta {wait_minutes:g} minutos...",
+        flush=True,
+    )
     deadline = monotonic() + UPLOAD_VERIFY_WAIT_MS / 1_000
     while monotonic() < deadline:
         page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
@@ -390,7 +413,7 @@ def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
         page.wait_for_timeout(UPLOAD_VERIFY_POLL_MS)
 
     raise RuntimeError(
-        "Komet programó el XLS, pero no mostró cajas después de esperar el procesamiento. "
+        f"Komet programó el XLS, pero no mostró cajas después de esperar {wait_minutes:g} minutos. "
         "No se marcará la carga como completada."
     )
 

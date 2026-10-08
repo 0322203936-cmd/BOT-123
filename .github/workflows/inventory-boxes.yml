@@ -13,7 +13,7 @@ permissions:
 jobs:
   inventory-boxes:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
@@ -40,6 +40,7 @@ jobs:
           MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
           CAJAS_EMAIL_CONFIG: ${{ vars.CAJAS_EMAIL_CONFIG }}
           SHAREPOINT_BOXES_URL: ${{ vars.SHAREPOINT_BOXES_URL }}
+          KOMET_UPLOAD_VERIFY_WAIT_MS: ${{ vars.KOMET_UPLOAD_VERIFY_WAIT_MS }}
         run: python -u bot/inventory_boxes.py
 
       - name: Guardar capturas
