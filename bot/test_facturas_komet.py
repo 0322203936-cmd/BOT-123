@@ -62,6 +62,16 @@ class ExportDetailsTests(unittest.TestCase):
         for field in self.details:
             self.assertIn(field, config["bodyHtml"])
 
+    def test_order_details_status_email_sends_to_irene_and_jesus(self):
+        config = export_details_email_config(
+            self.details, "Irene.Machain@Pacifica-farms.com; jesus.sandoval@cfbc.co",
+            posco_status="applied_confirmed",
+        )
+        self.assertEqual(config["recipients"], [
+            "Irene.Machain@Pacifica-farms.com", "jesus.sandoval@cfbc.co",
+        ])
+        self.assertIn("Orden actualizada y confirmada en POSCO", config["bodyHtml"])
+
     def test_posco_review_is_amber_and_manual_failure_is_red(self):
         review = export_details_email_config(
             self.details, "irene@example.com", posco_status="staged_for_review",
