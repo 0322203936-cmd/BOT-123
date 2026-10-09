@@ -78,3 +78,59 @@ jobs:
           path: artifacts/facturas_komet/summary.json
           if-no-files-found: warn
           retention-days: 7
+
+  posco-order-artifacts:
+    # Separate job: the existing emails and their ledgers are finished first.
+    needs: facturas-komet
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - name: Descargar repositorio actualizado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Generar archivos de prueba POSCO sin enviar correos
+        env:
+          KOMET_USER: ${{ secrets.KOMET_USER }}
+          KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
+          KOMET_TIMEZONE: America/Tijuana
+          KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
+          KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
+        run: python -u bot/posco_order_artifacts.py
+
+      - name: Guardar archivos y reporte POSCO como artefacto
+        id: upload_posco
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pedidos-posco-prueba-${{ github.run_number }}
+          path: artifacts/facturas_komet/posco_orders/*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar bitácora separada de transformaciones
+        if: ${{ success() && steps.upload_posco.outcome == 'success' }}
+        run: |
+          if [ -z "$(git status --porcelain -- bot/data/posco_transformados.json)" ]; then
+            echo "No hay nuevas transformaciones POSCO para registrar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bot/data/posco_transformados.json
+          git commit -m "Registrar pedidos POSCO transformados [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
