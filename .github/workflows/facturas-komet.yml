@@ -2,12 +2,6 @@ name: Bot Facturas Komet - Prueba
 
 on:
   workflow_dispatch:
-    inputs:
-      posco_replay_all:
-        description: 'Solo POSCO: regenerar y subir a revisión todas las órdenes elegibles del rango, sin correos ni cambios de bitácora'
-        type: boolean
-        required: false
-        default: false
 
 concurrency:
   group: kometsales-facturas-prueba
@@ -18,7 +12,6 @@ permissions:
 
 jobs:
   facturas-komet:
-    if: ${{ !inputs.posco_replay_all }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -87,9 +80,8 @@ jobs:
           retention-days: 7
 
   posco-order-artifacts:
-    # Normal runs wait for the email job; replay runs skip it entirely.
+    # Separate job: the existing emails and their ledgers are finished first.
     needs: facturas-komet
-    if: ${{ always() && (inputs.posco_replay_all || needs.facturas-komet.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -118,7 +110,6 @@ jobs:
           KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
           KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
           KOMET_POSCO_STAGE_MODE: all
-          KOMET_POSCO_REPLAY_ALL: ${{ inputs.posco_replay_all && 'YES' || 'NO' }}
           POSCO_USER: ${{ secrets.POSCO_USER }}
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
         run: python -u bot/posco_order_artifacts.py
