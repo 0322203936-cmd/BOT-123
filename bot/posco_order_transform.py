@@ -22,6 +22,7 @@ HEADERS = (
 )
 BOX_CODES = {"D": "F3", "L": "F4", "1/2L": "F5", "WET": "H3"}
 MIXED_BOXES = {"day of dead mixed box", "california greens mixed box"}
+CARRIER_ABBREVIATIONS = {"floral trade distributors": "FTD"}
 
 
 class TransformationError(ValueError):
@@ -30,6 +31,19 @@ class TransformationError(ValueError):
 
 def clean(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def carrier_abbreviation(value: object) -> str:
+    carrier = clean(value)
+    if not carrier:
+        raise TransformationError("Carrier vacío en el detalle de la orden.")
+    known = CARRIER_ABBREVIATIONS.get(carrier.casefold())
+    if known:
+        return known
+    first_word = re.search(r"[A-Za-z]+", carrier)
+    if not first_word or len(first_word.group()) < 3:
+        raise TransformationError(f"Carrier {carrier!r} no permite obtener una abreviación de tres letras.")
+    return first_word.group()[:3].upper()
 
 
 def required_positive_int(value: object, label: str) -> int:
@@ -105,7 +119,10 @@ def parse_order_xls(path: Path) -> tuple[dict[str, str], list[dict]]:
         sheet = workbook.sheet_by_name("Order Details") if "Order Details" in workbook.sheet_names() else workbook.sheet_by_index(0)
     except Exception as error:
         raise TransformationError("No se pudo leer el Excel Order Details descargado.") from error
-    labels = {"order number": "order_number", "customer": "customer", "ship date": "ship_date"}
+    labels = {
+        "order number": "order_number", "customer": "customer",
+        "ship date": "ship_date", "carrier": "carrier",
+    }
     details: dict[str, object] = {}
     header_row = None
     columns: dict[str, int] = {}
@@ -123,7 +140,7 @@ def parse_order_xls(path: Path) -> tuple[dict[str, str], list[dict]]:
     if header_row is None or not required.issubset(columns):
         raise TransformationError("El XLS no contiene la tabla Boxes con sus columnas esperadas.")
     if not all(details.get(field) for field in labels.values()):
-        raise TransformationError("El XLS no contiene Order Number, Customer y Ship Date completos.")
+        raise TransformationError("El XLS no contiene Order Number, Customer, Ship Date y Carrier completos.")
     try:
         details["ship_date_value"] = datetime.strptime(details["ship_date"], "%m/%d/%Y")
     except ValueError as error:
@@ -158,6 +175,7 @@ def parse_order_xls(path: Path) -> tuple[dict[str, str], list[dict]]:
 
 def build_order_rows(details: dict, boxes: list[dict], lookup: dict[str, list[dict]]) -> list[list]:
     output: list[list] = []
+    carrier_code = carrier_abbreviation(details.get("carrier"))
     for box in boxes:
         product = box["product"]
         name = product.casefold()
@@ -183,7 +201,7 @@ def build_order_rows(details: dict, boxes: list[dict], lookup: dict[str, list[di
         ship_date = details["ship_date_value"]
         output.append([
             "PACIFICA PRODUCE FARMS", "WHOLESALE", entry["description"],
-            f"{details['customer']} {details['order_number']}", "CB / BULK",
+            f"{details['customer']} - {carrier_code} {details['order_number']}", "CB / BULK",
             entry["flower"], entry["color"], ship_date, 1, bunches, stems,
             ship_date - timedelta(days=3), BOX_CODES[box_type],
         ])
