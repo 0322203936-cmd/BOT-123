@@ -95,11 +95,11 @@ class PoscoTransformTests(unittest.TestCase):
         self.assertEqual([row[8] for row in rows], [1, 1])
         self.assertEqual([row[3] for row in rows], ["ARIZONA FLORAL EXCHANGE - FTD 000317"] * 2)
 
-    def test_other_carriers_use_first_three_letters(self):
+    def test_other_carriers_use_two_letters_plus_next_word_or_three_from_one_word(self):
         armellini = build_order_rows({**self.details, "carrier": "Armellini - Regular"}, [self.box], self.homologation)
         prime = build_order_rows({**self.details, "carrier": "Prime Floral"}, [self.box], self.homologation)
         self.assertEqual(armellini[0][3], "ARIZONA FLORAL EXCHANGE - ARM 000317")
-        self.assertEqual(prime[0][3], "ARIZONA FLORAL EXCHANGE - PRI 000317")
+        self.assertEqual(prime[0][3], "ARIZONA FLORAL EXCHANGE - PRF 000317")
 
     def test_missing_carrier_is_not_silently_omitted(self):
         with self.assertRaisesRegex(TransformationError, "Carrier vacío"):

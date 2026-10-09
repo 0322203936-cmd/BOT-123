@@ -40,10 +40,14 @@ def carrier_abbreviation(value: object) -> str:
     known = CARRIER_ABBREVIATIONS.get(carrier.casefold())
     if known:
         return known
-    first_word = re.search(r"[A-Za-z]+", carrier)
-    if not first_word or len(first_word.group()) < 3:
+    # A suffix after a spaced dash describes the service, not another carrier word.
+    name = re.split(r"\s+[-–—]\s+", carrier, maxsplit=1)[0]
+    words = re.findall(r"[A-Za-z]+", name)
+    if len(words) >= 2 and len(words[0]) >= 2:
+        return (words[0][:2] + words[1][0]).upper()
+    if not words or len(words[0]) < 3:
         raise TransformationError(f"Carrier {carrier!r} no permite obtener una abreviación de tres letras.")
-    return first_word.group()[:3].upper()
+    return words[0][:3].upper()
 
 
 def required_positive_int(value: object, label: str) -> int:
