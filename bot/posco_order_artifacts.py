@@ -114,7 +114,7 @@ def download_with_recovery(
 
 
 def transform_visible_orders(
-    page, ledger: set[str], lookup: dict, template: bytes, report: dict,
+    page, ledger: set[str], ignored: set[str], lookup: dict, template: bytes, report: dict,
     from_date: date, until_date: date,
 ) -> None:
     orders = collect_filtered_orders(page)
@@ -122,6 +122,10 @@ def transform_visible_orders(
         key = komet.order_key(order)
         if key in ledger:
             report["orders"].append({"order": order["order"], "key": key, "status": "already_transformed"})
+            continue
+        if key in ignored:
+            report["orders"].append({"order": order["order"], "key": key, "status": "manual"})
+            print(f"POSCO {order['order']}: omitida por gestión manual.", flush=True)
             continue
         try:
             source = download_with_recovery(page, order, index, from_date, until_date)
@@ -152,7 +156,7 @@ def run() -> dict:
     }
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        ledger = transform.load_transformed_keys(LEDGER_PATH)
+        ledger, ignored = transform.load_order_state(LEDGER_PATH)
         lookup = transform.load_homologation(transform.secret_workbook("KOMET_POSCO_MAPPING_B64"))
         template = transform.secret_workbook("KOMET_POSCO_TEMPLATE_B64")
         transform.validate_template(template)
@@ -170,7 +174,7 @@ def run() -> dict:
                 # Match the proven second filter/search pass in the mail flow.
                 komet.fill_order_dates(page, from_date, until_date)
                 komet.search_orders(page)
-                transform_visible_orders(page, ledger, lookup, template, report, from_date, until_date)
+                transform_visible_orders(page, ledger, ignored, lookup, template, report, from_date, until_date)
             finally:
                 context.close()
                 browser.close()
@@ -180,10 +184,12 @@ def run() -> dict:
     finally:
         report["generated"] = sum(item["status"] == "generated" for item in report["orders"])
         report["errors"] = sum(item["status"] == "error" for item in report["orders"])
+        report["manual"] = sum(item["status"] == "manual" for item in report["orders"])
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(
             f"POSCO: {report['generated']} archivo(s), {report['errors']} error(es), "
-            f"{sum(item['status'] == 'already_transformed' for item in report['orders'])} ya transformadas.",
+            f"{sum(item['status'] == 'already_transformed' for item in report['orders'])} ya transformadas, "
+            f"{report['manual']} de gestión manual.",
             flush=True,
         )
     return report
