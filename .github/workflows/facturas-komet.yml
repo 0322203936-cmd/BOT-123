@@ -2,6 +2,21 @@ name: Bot Facturas Komet - Prueba
 
 on:
   workflow_dispatch:
+    inputs:
+      posco_stage_mode:
+        description: "Carga de Excel POSCO para revisión (sin pulsar Actualizar)"
+        type: choice
+        required: true
+        default: "off"
+        options:
+          - "off"
+          - "single"
+          - "all"
+      posco_stage_order:
+        description: "Opcional: limitar la prueba a una orden, por ejemplo W000317"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: kometsales-facturas-prueba
@@ -102,13 +117,17 @@ jobs:
           pip install -r bot/requirements.txt
           playwright install --with-deps chromium
 
-      - name: Generar archivos de prueba POSCO sin enviar correos
+      - name: Generar Excel POSCO y, si se habilita, cargarlos solo para revisión
         env:
           KOMET_USER: ${{ secrets.KOMET_USER }}
           KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
           KOMET_TIMEZONE: America/Tijuana
           KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
           KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
+          KOMET_POSCO_STAGE_MODE: ${{ inputs.posco_stage_mode || 'off' }}
+          KOMET_POSCO_STAGE_ORDER: ${{ inputs.posco_stage_order || '' }}
+          POSCO_USER: ${{ secrets.POSCO_USER }}
+          POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
         run: python -u bot/posco_order_artifacts.py
 
       - name: Guardar archivos y reporte POSCO como artefacto
@@ -124,12 +143,12 @@ jobs:
       - name: Guardar bitácora separada de transformaciones
         if: ${{ always() && steps.upload_posco.outcome == 'success' }}
         run: |
-          if [ -z "$(git status --porcelain -- bot/data/posco_transformados.json)" ]; then
+          if [ -z "$(git status --porcelain -- bot/data/posco_transformados.json bot/data/posco_cargas.json)" ]; then
             echo "No hay nuevas transformaciones POSCO para registrar."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bot/data/posco_transformados.json
+          git add bot/data/posco_transformados.json bot/data/posco_cargas.json
           git commit -m "Registrar pedidos POSCO transformados [skip ci]"
           git push origin "HEAD:${GITHUB_REF_NAME}"
