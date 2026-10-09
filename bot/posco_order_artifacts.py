@@ -119,15 +119,11 @@ def download_with_recovery(
 def transform_visible_orders(
     page, ledger: set[str], ignored: set[str], lookup: dict, template: bytes, report: dict,
     from_date: date, until_date: date, *, stage_mode: str = "off", stage_page=None,
-    stage_state: dict[str, set[str]] | None = None, stage_order: str = "",
+    stage_state: dict[str, set[str]] | None = None,
 ) -> None:
     orders = collect_filtered_orders(page)
-    staged_attempts = 0
     for index, order in enumerate(orders, start=1):
         key = komet.order_key(order)
-        if stage_mode != "off" and stage_order and order["order"].strip().upper() != stage_order:
-            report["orders"].append({"order": order["order"], "key": key, "status": "outside_test_order"})
-            continue
         if key in ignored:
             report["orders"].append({"order": order["order"], "key": key, "status": "manual"})
             print(f"POSCO {order['order']}: omitida por gestión manual.", flush=True)
@@ -155,13 +151,6 @@ def transform_visible_orders(
                 transform.save_transformed_keys(ledger | {key}, LEDGER_PATH)
                 ledger.add(key)
             if stage_mode != "off":
-                if stage_mode == "single" and staged_attempts >= 1:
-                    report["orders"].append({
-                        "order": order["order"], "key": key, "status": "generated_pending_stage",
-                        "boxes": len(rows), "file": destination.name,
-                    })
-                    continue
-                staged_attempts += 1
                 stage_state["needs_review"].add(key)
                 posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
                 review_image = ARTIFACTS_DIR / f"{index:03d}_{komet.safe_filename(order['order'])}_posco_review.png"
@@ -195,11 +184,8 @@ def transform_visible_orders(
 def run() -> dict:
     from_date, until_date = komet.komet_dates()
     stage_mode = os.environ.get("KOMET_POSCO_STAGE_MODE", "off").strip().lower()
-    stage_order = os.environ.get("KOMET_POSCO_STAGE_ORDER", "").strip().upper()
-    if stage_mode not in {"off", "single", "all"}:
-        raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off, single o all.")
-    if stage_mode == "off" and stage_order:
-        raise ValueError("KOMET_POSCO_STAGE_ORDER requiere habilitar KOMET_POSCO_STAGE_MODE.")
+    if stage_mode not in {"off", "all"}:
+        raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off o all.")
     report = {
         "from": from_date.isoformat(), "until": until_date.isoformat(),
         "orders": [], "global_error": None,
@@ -234,7 +220,6 @@ def run() -> dict:
                 transform_visible_orders(
                     page, ledger, ignored, lookup, template, report, from_date, until_date,
                     stage_mode=stage_mode, stage_page=stage_page, stage_state=stage_state,
-                    stage_order=stage_order,
                 )
             finally:
                 context.close()

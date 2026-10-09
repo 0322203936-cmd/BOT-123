@@ -70,7 +70,7 @@ class PoscoOrderImportTests(unittest.TestCase):
                 artifacts.transform_visible_orders(
                     None, {"W000317|10/12/2026"}, set(), {}, b"template", report,
                     date(2026, 10, 9), date(2026, 10, 20),
-                    stage_mode="single", stage_page=Mock(), stage_state=state,
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
                 )
             self.assertEqual([item["status"] for item in report["orders"]], ["legacy", "staged_for_review"])
             self.assertEqual(download.call_count, 1)
@@ -90,7 +90,7 @@ class PoscoOrderImportTests(unittest.TestCase):
             artifacts.transform_visible_orders(
                 None, {"W000400|10/20/2026"}, set(), {}, b"template", report,
                 date(2026, 10, 9), date(2026, 10, 20),
-                stage_mode="single", stage_page=Mock(), stage_state=state,
+                stage_mode="all", stage_page=Mock(), stage_state=state,
             )
         self.assertEqual(report["orders"][0]["status"], "needs_manual_review")
         download.assert_not_called()
@@ -162,7 +162,7 @@ class PoscoOrderImportTests(unittest.TestCase):
                 artifacts.transform_visible_orders(
                     None, set(), set(), {}, b"template", report,
                     date(2026, 10, 9), date(2026, 10, 20),
-                    stage_mode="single", stage_page=Mock(), stage_state=state,
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
                 )
             self.assertEqual(report["orders"][0]["status"], "error")
             self.assertEqual(state["needs_review"], {"W000400|10/20/2026"})
@@ -200,14 +200,14 @@ class PoscoOrderImportTests(unittest.TestCase):
             self.assertEqual(len(report["orders"]), 1)
             self.assertEqual(state["needs_review"], {"W000400|10/20/2026"})
 
-    def test_order_filter_stages_only_requested_order(self):
+    def test_automatic_mode_skips_legacy_and_stages_pilot_order(self):
         orders = [
             {"order": "W000400", "date": "10/20/2026", "internal_id": "400"},
             {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
         ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+            state = {"legacy_orders": {"W000400|10/20/2026"}, "staged_orders": set(), "needs_review": set()}
             with (
                 patch.object(artifacts, "ARTIFACTS_DIR", root),
                 patch.object(artifacts, "LEDGER_PATH", root / "transformed.json"),
@@ -225,10 +225,9 @@ class PoscoOrderImportTests(unittest.TestCase):
                 artifacts.transform_visible_orders(
                     None, set(), set(), {}, b"template", report,
                     date(2026, 10, 9), date(2026, 10, 21),
-                    stage_mode="single", stage_page=Mock(), stage_state=state,
-                    stage_order="W000317",
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
                 )
-            self.assertEqual([item["status"] for item in report["orders"]], ["outside_test_order", "staged_for_review"])
+            self.assertEqual([item["status"] for item in report["orders"]], ["legacy", "staged_for_review"])
             self.assertEqual(download.call_count, 1)
             self.assertEqual(stage.call_args.args[2], "W000317")
 
