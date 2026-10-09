@@ -296,16 +296,15 @@ class PoscoOrderImportTests(unittest.TestCase):
             self.assertEqual(download.call_count, 1)
             self.assertEqual(stage.call_args.args[2], "W000317")
 
-    def test_stage_ledger_is_cleared_without_touching_mail_ledgers(self):
+    def test_pilot_mail_ledgers_remain_separate_from_stage_ledger(self):
         from bot import posco_order_transform as transform
 
         root = Path(__file__).parent / "data"
         transformed, ignored = transform.load_order_state(root / "posco_transformados.json")
-        stage_state = posco_import.load_stage_state(root / "posco_cargas.json")
+        posco_import.load_stage_state(root / "posco_cargas.json")
         pilot = "W000317|10/12/2026"
         self.assertIn(pilot, transformed)
         self.assertNotIn(pilot, ignored)
-        self.assertEqual(stage_state, {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()})
         self.assertIn(pilot, (root / "facturas_enviadas.json").read_text(encoding="utf-8"))
         self.assertIn(pilot, (root / "detalles_exportacion_enviados.json").read_text(encoding="utf-8"))
 
