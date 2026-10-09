@@ -336,6 +336,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability = workbook.create_sheet("Availability")
             availability.append(["Product Description", "Available From"])
             availability.append(["A", date(2026, 9, 14)])
+            availability.append(["Day of Dead Mixed Box", date(2026, 9, 15)])
+            availability.append(["California Greens Mixed Box", date(2026, 9, 16)])
             availability["A2"].font = Font(name="Arial", bold=True)
             availability["B2"].number_format = "mmm d, yyyy"
             workbook.save(source)
@@ -354,6 +356,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
                 self.assertEqual(result.active["B2"].value.date(), date(2026, 9, 14))
                 self.assertEqual(result.active["B2"].number_format, DATE_NUMBER_FORMAT)
+                self.assertEqual(result.active["A3"].value, "Day of Dead Sampler")
+                self.assertEqual(result.active["A4"].value, "Greens Sampler")
             finally:
                 result.close()
 
@@ -568,8 +572,10 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     [customer.cell(row=row, column=1).value for row in range(mixed_row + 1, mixed_row + 3)],
-                    ["Day of Dead Sampler", "Greens Sampler"],
+                    ["Day of Dead Mixed Box", "California Greens Mixed Box"],
                 )
+                self.assertEqual(result["Availability"]["B2"].value, "Day of Dead Sampler")
+                self.assertEqual(result["Availability"]["B4"].value, "Greens Sampler")
             finally:
                 result.close()
 

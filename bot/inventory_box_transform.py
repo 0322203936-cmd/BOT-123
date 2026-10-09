@@ -39,10 +39,16 @@ _CUSTOMER_VIEW_CATEGORY_ORDER = {
 _CUSTOMER_VIEW_CATEGORY_NAMES = {"ASTER": "ASTERS"}
 _CUSTOMER_VIEW_PRODUCT_CATEGORY_OVERRIDES = {
     "greens sampler": "MIXED BOXES",
+    "california greens mixed box": "MIXED BOXES",
     "myrtle green 60cm": "GREENS",
     "parvifolia green 50cm": "GREENS",
     "honey bracelet green 60cm": "GREENS",
     "day of dead sampler": "MIXED BOXES",
+    "day of dead mixed box": "MIXED BOXES",
+}
+_CUSTOMER_VIEW_PRODUCT_DISPLAY_NAMES = {
+    "greens sampler": "California Greens Mixed Box",
+    "day of dead sampler": "Day of Dead Mixed Box",
 }
 _CUSTOMER_VIEW_BOX_TYPES = {
     "D": "D - 2.93CU",
@@ -592,6 +598,11 @@ def _customer_view_category(product: str) -> str:
     return _CUSTOMER_VIEW_CATEGORY_NAMES.get(first_word, first_word)
 
 
+def _customer_view_product_name(product: str) -> str:
+    normalized_product = re.sub(r"\s+", " ", product.strip()).casefold()
+    return _CUSTOMER_VIEW_PRODUCT_DISPLAY_NAMES.get(normalized_product, product)
+
+
 def _customer_view_records(workbook) -> tuple[list[dict[str, Any]], list[date]]:
     """Build the product/date matrix that is shown to customers.
 
@@ -892,7 +903,7 @@ def rebuild_customer_view_from_availability(workbook_path: Path) -> int:
             product_index += 1
             product_fill = alternate_fill if product_index % 2 == 0 else PatternFill()
             values = (
-                record["product"],
+                _customer_view_product_name(record["product"]),
                 record["pack"],
                 record["units_per_pack"],
                 _CUSTOMER_VIEW_BOX_TYPES.get(
@@ -1333,9 +1344,14 @@ def create_single_sheet_workbook(
             raise RuntimeError(f"El libro no contiene la pestaña requerida {sheet_name}.")
         target_sheet = workbook[sheet_name]
         if sheet_name == KOMET_SHEET_NAME and normalize_available_from_dates:
-            header_row, _, date_column = _header_columns(target_sheet)
+            header_row, product_column, date_column = _header_columns(target_sheet)
             normalized_dates = 0
             for row in range(header_row + 1, target_sheet.max_row + 1):
+                product_cell = target_sheet.cell(row=row, column=product_column + 1)
+                product_cell.value = {
+                    "Day of Dead Mixed Box": "Day of Dead Sampler",
+                    "California Greens Mixed Box": "Greens Sampler",
+                }.get(product_cell.value, product_cell.value)
                 cell = target_sheet.cell(row=row, column=date_column + 1)
                 if cell.value in (None, ""):
                     continue
