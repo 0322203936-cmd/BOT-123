@@ -163,6 +163,9 @@ def export_details_email_config(
     details: dict[str, str], recipient: str, *, posco_status: str | None = None,
     posco_reason: str = "",
 ) -> dict:
+    recipients = list(dict.fromkeys(address.strip() for address in recipient.split(";") if address.strip()))
+    if not recipients:
+        raise ValueError("Order Details requiere al menos un destinatario.")
     order_number = details["Order Number"]
     rows = "".join(
         "<tr><th style='text-align:left;padding:6px 14px 6px 0'>"
@@ -182,7 +185,7 @@ def export_details_email_config(
         if posco_reason:
             body += f"<p>Motivo: {escape(normalize_space(posco_reason)[:300])}</p>"
     return {
-        "recipients": [recipient],
+        "recipients": recipients,
         "cc": [],
         "bcc": [],
         "subject": f"Nueva Orden Komet: {order_number}",

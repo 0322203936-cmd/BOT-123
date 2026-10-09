@@ -109,7 +109,7 @@ jobs:
           KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
           KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
           KOMET_POSCO_STAGE_MODE: apply
-          KOMET_ORDER_DETAILS_EMAIL: Irene.Machain@Pacifica-farms.com
+          KOMET_ORDER_DETAILS_EMAIL: "Irene.Machain@Pacifica-farms.com; jesus.sandoval@cfbc.co"
           POSCO_USER: ${{ secrets.POSCO_USER }}
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
           SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
