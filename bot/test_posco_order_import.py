@@ -57,6 +57,58 @@ class PoscoOrderImportTests(unittest.TestCase):
             posco_import.save_stage_state(path, state)
             self.assertEqual(posco_import.load_stage_state(path), state)
 
+    def test_cleared_stage_ledger_regenerates_old_orders_but_skips_manual(self):
+        orders = [
+            {"order": "000312", "date": "10/09/2026", "internal_id": "312"},
+            {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
+            {"order": "W000308", "date": "10/09/2026", "internal_id": "308"},
+        ]
+        legacy_key = "000312|10/09/2026"
+        staged_key = "W000317|10/12/2026"
+        manual_key = "W000308|10/09/2026"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger_path = root / "transformed.json"
+            stage_path = root / "stage.json"
+            ledger_path.write_text("existing transformation ledger", encoding="utf-8")
+            state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+            posco_import.save_stage_state(stage_path, state)
+            staged_orders = []
+
+            def stage_workbook(_page, _workbook, order_number, _screenshot):
+                staged_orders.append(order_number)
+                return "no_changes"
+
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", ledger_path),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", stage_path),
+                patch.object(artifacts, "collect_filtered_orders", return_value=orders),
+                patch.object(artifacts, "download_with_recovery", side_effect=lambda _p, order, *_: Path(order["order"] + ".xls")) as download,
+                patch.object(artifacts.transform, "parse_order_xls", side_effect=lambda path: ({"order_number": path.stem[-6:]}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["box"]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.transform, "save_transformed_keys") as save_transformed,
+                patch.object(artifacts.posco_import, "stage_workbook", side_effect=stage_workbook),
+            ):
+                report = {"orders": []}
+                artifacts.transform_visible_orders(
+                    None, {legacy_key, staged_key}, {manual_key}, {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 19),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                )
+
+            self.assertEqual(staged_orders, ["000312", "W000317"])
+            self.assertEqual(download.call_count, 2)
+            self.assertEqual([item["status"] for item in report["orders"]], [
+                "already_in_posco", "already_in_posco", "manual",
+            ])
+            self.assertEqual(len(list(root.glob("*.xlsx"))), 2)
+            self.assertEqual(ledger_path.read_text(encoding="utf-8"), "existing transformation ledger")
+            self.assertEqual(state, {"legacy_orders": set(), "staged_orders": {legacy_key, staged_key}, "needs_review": set()})
+            self.assertEqual(posco_import.load_stage_state(stage_path), state)
+            save_transformed.assert_not_called()
+
     def test_new_order_stages_but_old_order_is_skipped(self):
         orders = [
             {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
@@ -244,16 +296,15 @@ class PoscoOrderImportTests(unittest.TestCase):
             self.assertEqual(download.call_count, 1)
             self.assertEqual(stage.call_args.args[2], "W000317")
 
-    def test_pilot_order_is_marked_processed_without_touching_mail_ledgers(self):
+    def test_pilot_mail_ledgers_remain_separate_from_stage_ledger(self):
         from bot import posco_order_transform as transform
 
         root = Path(__file__).parent / "data"
         transformed, ignored = transform.load_order_state(root / "posco_transformados.json")
-        stage_state = posco_import.load_stage_state(root / "posco_cargas.json")
+        posco_import.load_stage_state(root / "posco_cargas.json")
         pilot = "W000317|10/12/2026"
         self.assertIn(pilot, transformed)
-        self.assertNotIn(pilot, ignored | stage_state["legacy_orders"] | stage_state["needs_review"])
-        self.assertIn(pilot, stage_state["staged_orders"])
+        self.assertNotIn(pilot, ignored)
         self.assertIn(pilot, (root / "facturas_enviadas.json").read_text(encoding="utf-8"))
         self.assertIn(pilot, (root / "detalles_exportacion_enviados.json").read_text(encoding="utf-8"))
 

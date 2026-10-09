@@ -48,6 +48,7 @@ class PoscoTransformTests(unittest.TestCase):
         ])
         self.details = {
             "order_number": "000317", "customer": "ARIZONA FLORAL EXCHANGE",
+            "carrier": "Floral Trade Distributors",
             "ship_date_value": datetime(2026, 10, 12),
         }
         self.box = {
@@ -60,7 +61,7 @@ class PoscoTransformTests(unittest.TestCase):
         rows = build_order_rows(self.details, [self.box], self.homologation)
         self.assertEqual(rows[0], [
             "PACIFICA PRODUCE FARMS", "WHOLESALE", "WS SUNFLOWER TT PINK 5 ST PK 10",
-            "ARIZONA FLORAL EXCHANGE 000317", "CB / BULK", "SUNFLOWER TT",
+            "ARIZONA FLORAL EXCHANGE - FTD 000317", "CB / BULK", "SUNFLOWER TT",
             "SUNFLOWER TT - PLUM PINK", datetime(2026, 10, 12), 1, 10, 5,
             datetime(2026, 10, 9), "F4",
         ])
@@ -72,6 +73,7 @@ class PoscoTransformTests(unittest.TestCase):
             self.assertEqual(sheet.title, "New Order")
             self.assertEqual([sheet.cell(1, c).value for c in range(1, 14)], list(HEADERS))
             self.assertEqual(sheet["C2"].value, rows[0][2])
+            self.assertEqual(sheet["D2"].value, "ARIZONA FLORAL EXCHANGE - FTD 000317")
             self.assertEqual(sheet["L2"].value, datetime(2026, 10, 9))
             self.assertEqual(sheet["I2"].value, 1)
             self.assertNotEqual(sheet["A2"].value, "SAMPLE VENDOR")
@@ -91,6 +93,17 @@ class PoscoTransformTests(unittest.TestCase):
         rows = build_order_rows(self.details, [self.box, other], self.homologation)
         self.assertEqual(len(rows), 2)
         self.assertEqual([row[8] for row in rows], [1, 1])
+        self.assertEqual([row[3] for row in rows], ["ARIZONA FLORAL EXCHANGE - FTD 000317"] * 2)
+
+    def test_other_carriers_use_two_letters_plus_next_word_or_three_from_one_word(self):
+        armellini = build_order_rows({**self.details, "carrier": "Armellini - Regular"}, [self.box], self.homologation)
+        prime = build_order_rows({**self.details, "carrier": "Prime Floral"}, [self.box], self.homologation)
+        self.assertEqual(armellini[0][3], "ARIZONA FLORAL EXCHANGE - ARM 000317")
+        self.assertEqual(prime[0][3], "ARIZONA FLORAL EXCHANGE - PRF 000317")
+
+    def test_missing_carrier_is_not_silently_omitted(self):
+        with self.assertRaisesRegex(TransformationError, "Carrier vacío"):
+            build_order_rows({**self.details, "carrier": ""}, [self.box], self.homologation)
 
     def test_pack_or_stems_mismatch_is_error(self):
         with self.assertRaisesRegex(TransformationError, "homologación no encontrada"):
