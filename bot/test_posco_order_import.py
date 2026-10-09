@@ -23,15 +23,27 @@ class PoscoOrderImportTests(unittest.TestCase):
             workbook.write_bytes(b"xlsx")
             page = Mock()
             page.get_by_text.return_value.is_visible.return_value = False
-            posco_import.stage_workbook(page, workbook, "W000400", Path(directory) / "review.png")
+            result = posco_import.stage_workbook(page, workbook, "W000400", Path(directory) / "review.png")
             page.locator.assert_any_call('input[type="file"][name="file"]')
             page.locator.assert_any_call('select[name="upload_mode"]')
             page.locator('input[type="file"][name="file"]').set_input_files.assert_called_with(str(workbook))
             page.locator('select[name="upload_mode"]').select_option.assert_called_with("pacifica2")
             page.get_by_role.assert_any_call("button", name="Upload", exact=True)
             page.get_by_role("heading", name="Import excel").wait_for.assert_called_with(state="hidden", timeout=600_000)
-            page.get_by_text("No elements found", exact=True).wait_for.assert_called_with(state="hidden", timeout=600_000)
+            self.assertEqual(result, "uploaded")
+            self.assertNotIn("No elements found", str(page.mock_calls))
             page.screenshot.assert_called_once_with(path=str(Path(directory) / "review.png"), full_page=True)
+            self.assertNotIn('name="Actualizar"', str(page.mock_calls))
+
+    def test_sin_cambios_is_a_successful_upload_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "existing-order.xlsx"
+            workbook.write_bytes(b"xlsx")
+            page = Mock()
+            page.get_by_text("Sin Cambios", exact=True).is_visible.return_value = True
+            result = posco_import.stage_workbook(page, workbook, "W000317", Path(directory) / "review.png")
+            self.assertEqual(result, "no_changes")
+            page.screenshot.assert_called_once()
             self.assertNotIn('name="Actualizar"', str(page.mock_calls))
 
     def test_stage_ledger_preserves_legacy_and_uncertain_orders(self):
@@ -107,6 +119,7 @@ class PoscoOrderImportTests(unittest.TestCase):
 
             def record_stage(_page, _workbook, order_number, _screenshot):
                 staged_in_order.append(order_number)
+                return "no_changes" if order_number == "W000400" else "uploaded"
 
             with (
                 patch.object(artifacts, "ARTIFACTS_DIR", root),
@@ -131,7 +144,7 @@ class PoscoOrderImportTests(unittest.TestCase):
             self.assertEqual(staged_in_order, ["W000400", "W000401"])
             self.assertEqual(
                 [item["status"] for item in report["orders"]],
-                ["staged_for_review", "staged_for_review"],
+                ["already_in_posco", "staged_for_review"],
             )
             self.assertEqual(state["staged_orders"], {"W000400|10/20/2026", "W000401|10/21/2026"})
             self.assertEqual(posco_import.load_stage_state(root / "stage.json"), state)
@@ -231,14 +244,16 @@ class PoscoOrderImportTests(unittest.TestCase):
             self.assertEqual(download.call_count, 1)
             self.assertEqual(stage.call_args.args[2], "W000317")
 
-    def test_pilot_order_is_removed_only_from_posco_ledgers(self):
+    def test_pilot_order_is_marked_processed_without_touching_mail_ledgers(self):
         from bot import posco_order_transform as transform
 
         root = Path(__file__).parent / "data"
         transformed, ignored = transform.load_order_state(root / "posco_transformados.json")
         stage_state = posco_import.load_stage_state(root / "posco_cargas.json")
         pilot = "W000317|10/12/2026"
-        self.assertNotIn(pilot, transformed | ignored | set().union(*stage_state.values()))
+        self.assertIn(pilot, transformed)
+        self.assertNotIn(pilot, ignored | stage_state["legacy_orders"] | stage_state["needs_review"])
+        self.assertIn(pilot, stage_state["staged_orders"])
         self.assertIn(pilot, (root / "facturas_enviadas.json").read_text(encoding="utf-8"))
         self.assertIn(pilot, (root / "detalles_exportacion_enviados.json").read_text(encoding="utf-8"))
 

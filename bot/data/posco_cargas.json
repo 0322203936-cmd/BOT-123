@@ -5,8 +5,8 @@
     "000315|10/16/2026",
     "W000316|10/15/2026"
   ],
-  "staged_orders": [],
-  "needs_review": [
+  "staged_orders": [
     "W000317|10/12/2026"
-  ]
+  ],
+  "needs_review": []
 }

@@ -42,8 +42,8 @@ def open_import_screen(page, user: str, password: str) -> None:
     page.get_by_role("button", name="Revisar Archivo").wait_for(state="visible", timeout=30_000)
 
 
-def stage_workbook(page, workbook: Path, order_number: str, screenshot: Path) -> None:
-    """Upload one workbook for review, without applying it to the order list."""
+def stage_workbook(page, workbook: Path, order_number: str, screenshot: Path) -> str:
+    """Upload one workbook without applying it; accept POSCO's 'Sin Cambios' result."""
     if not workbook.is_file():
         raise FileNotFoundError(workbook)
     page.get_by_role("button", name="Revisar Archivo").click()
@@ -52,10 +52,11 @@ def stage_workbook(page, workbook: Path, order_number: str, screenshot: Path) ->
     try:
         page.get_by_role("button", name="Upload", exact=True).click()
         page.get_by_role("heading", name="Import excel").wait_for(state="hidden", timeout=600_000)
-        page.get_by_text("No elements found", exact=True).wait_for(state="hidden", timeout=600_000)
+        result = "no_changes" if page.get_by_text("Sin Cambios", exact=True).is_visible() else "uploaded"
     except Exception as error:
-        raise RuntimeError(f"POSCO no confirmó filas para revisar de la orden {order_number}.") from error
+        raise RuntimeError(f"POSCO no terminó la carga de la orden {order_number}.") from error
     finally:
         screenshot.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(screenshot), full_page=True)
     # Upload only stages a review. The final "Actualizar" action is deliberately absent.
+    return result
