@@ -116,17 +116,61 @@ def download_with_recovery(
             ) from second_error
 
 
+def send_status_email_if_pending(
+    page, order: dict[str, str], index: int, key: str, source: Path | None,
+    status: str, reason: str, recipient: str, sent_keys: set[str],
+    from_date: date, until_date: date,
+) -> bool:
+    """Send the original Order Details once, after the POSCO result is known."""
+    if key in sent_keys:
+        return False
+    if source is None:
+        source = download_with_recovery(page, order, index, from_date, until_date)
+    details = komet.parse_export_details(source)
+    verify_order_number(order["order"], details["Order Number"])
+    komet.send_export_details_email(
+        source, details, recipient, posco_status=status, posco_reason=reason,
+    )
+    sent_keys.add(key)
+    komet.save_sent_order_keys(sent_keys, komet.SENT_EXPORT_DETAILS_PATH)
+    print(f"Detalle de {order['order']} enviado con estado POSCO {status}.", flush=True)
+    return True
+
+
 def transform_visible_orders(
     page, ledger: set[str], ignored: set[str], lookup: dict, template: bytes, report: dict,
     from_date: date, until_date: date, *, stage_mode: str = "off", stage_page=None,
-    stage_state: dict[str, set[str]] | None = None,
+    stage_state: dict[str, set[str]] | None = None, mail_recipient: str = "",
+    sent_detail_keys: set[str] | None = None, sent_invoice_keys: set[str] | None = None,
 ) -> None:
     orders = collect_filtered_orders(page)
     for index, order in enumerate(orders, start=1):
         key = komet.order_key(order)
+        should_mail = (
+            bool(mail_recipient) and sent_detail_keys is not None
+            and sent_invoice_keys is not None and key in sent_invoice_keys
+            and key not in sent_detail_keys
+        )
+        source: Path | None = None
+
+        def mail_after_status(status: str, reason: str = "") -> None:
+            if not should_mail:
+                return
+            try:
+                sent = send_status_email_if_pending(
+                    page, order, index, key, source, status, reason, mail_recipient,
+                    sent_detail_keys, from_date, until_date,
+                )
+                if sent:
+                    report.setdefault("details_email_sent", []).append({"order": order["order"], "status": status})
+            except Exception as error:
+                report.setdefault("email_errors", []).append({"order": order["order"], "error": str(error)})
+                print(f"ERROR correo Order Details {order['order']}: {error}", flush=True)
+
         if key in ignored:
             report["orders"].append({"order": order["order"], "key": key, "status": "manual"})
             print(f"POSCO {order['order']}: omitida por gestión manual.", flush=True)
+            mail_after_status("manual")
             continue
         if stage_mode != "off":
             assert stage_state is not None
@@ -136,9 +180,11 @@ def transform_visible_orders(
             ) if key in stage_state[field]), None)
             if stage_status:
                 report["orders"].append({"order": order["order"], "key": key, "status": stage_status})
+                mail_after_status(stage_status)
                 continue
         elif key in ledger:
             report["orders"].append({"order": order["order"], "key": key, "status": "already_transformed"})
+            mail_after_status("already_transformed")
             continue
         try:
             source = download_with_recovery(page, order, index, from_date, until_date)
@@ -169,18 +215,27 @@ def transform_visible_orders(
                     print(f"POSCO {order['order']}: Sin Cambios; ya existe en POSCO. Actualizar no se pulsó.", flush=True)
                 else:
                     print(f"POSCO {order['order']}: archivo cargado para revisión; Actualizar no se pulsó.", flush=True)
+                mail_after_status("already_in_posco" if upload_result == "no_changes" else "staged_for_review")
                 continue
             report["orders"].append({
                 "order": order["order"], "key": key, "status": "generated",
                 "boxes": len(rows), "file": destination.name,
             })
             print(f"POSCO {order['order']}: {len(rows)} caja(s) en {destination.name}.", flush=True)
+            mail_after_status("generated")
         except Exception as error:
             report["orders"].append({
                 "order": order["order"], "key": key, "status": "error", "error": str(error),
             })
             print(f"ERROR POSCO {order['order']}: {error}", flush=True)
-            if stage_mode == "all" and stage_state is not None and key in stage_state["needs_review"]:
+            uncertain_upload = stage_state is not None and key in stage_state["needs_review"]
+            if uncertain_upload:
+                mail_after_status("needs_manual_review", "POSCO no confirmó la carga del archivo.")
+            elif isinstance(error, transform.TransformationError):
+                mail_after_status("error", str(error))
+            # Transient download/network errors leave the email pending until a later run
+            # can determine a truthful POSCO outcome.
+            if stage_mode == "all" and uncertain_upload:
                 print("POSCO: carga sin confirmar; se detienen las siguientes para revisión manual.", flush=True)
                 break
 
@@ -192,12 +247,15 @@ def run() -> dict:
         raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off o all.")
     report = {
         "from": from_date.isoformat(), "until": until_date.isoformat(),
-        "orders": [], "global_error": None,
+        "orders": [], "global_error": None, "details_email_sent": [], "email_errors": [],
     }
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         ledger, ignored = transform.load_order_state(LEDGER_PATH)
         stage_state = posco_import.load_stage_state(STAGE_LEDGER_PATH) if stage_mode != "off" else None
+        mail_recipient = os.environ.get("KOMET_ORDER_DETAILS_EMAIL", "").strip()
+        sent_detail_keys = komet.load_sent_order_keys(komet.SENT_EXPORT_DETAILS_PATH) if mail_recipient else None
+        sent_invoice_keys = komet.load_sent_order_keys() if mail_recipient else None
         lookup = transform.load_homologation(transform.secret_workbook("KOMET_POSCO_MAPPING_B64"))
         template = transform.secret_workbook("KOMET_POSCO_TEMPLATE_B64")
         transform.validate_template(template)
@@ -224,6 +282,8 @@ def run() -> dict:
                 transform_visible_orders(
                     page, ledger, ignored, lookup, template, report, from_date, until_date,
                     stage_mode=stage_mode, stage_page=stage_page, stage_state=stage_state,
+                    mail_recipient=mail_recipient, sent_detail_keys=sent_detail_keys,
+                    sent_invoice_keys=sent_invoice_keys,
                 )
             finally:
                 context.close()
@@ -240,7 +300,8 @@ def run() -> dict:
         print(
             f"POSCO: {report['generated']} archivo(s), {report['errors']} error(es), "
             f"{sum(item['status'] == 'already_transformed' for item in report['orders'])} ya transformadas, "
-            f"{report['manual']} de gestión manual.",
+            f"{report['manual']} de gestión manual, "
+            f"{len(report['details_email_sent'])} correo(s) Order Details enviados.",
             flush=True,
         )
     return report
@@ -248,5 +309,5 @@ def run() -> dict:
 
 if __name__ == "__main__":
     result = run()
-    if result["global_error"] or result["errors"]:
+    if result["global_error"] or result["errors"] or result["email_errors"]:
         raise SystemExit(1)

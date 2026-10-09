@@ -159,6 +159,214 @@ class PoscoOrderImportTests(unittest.TestCase):
         self.assertEqual(report["orders"][0]["status"], "needs_manual_review")
         download.assert_not_called()
 
+    def test_new_order_mails_original_details_after_posco_review_once(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        key = "W000400|10/20/2026"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+            sent_details = set()
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", root / "transformed.json"),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", root / "stage.json"),
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.transform, "parse_order_xls", return_value=({"order_number": "000400"}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["box"]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email") as send,
+                patch.object(artifacts.posco_import, "stage_workbook", return_value="uploaded") as stage,
+            ):
+                report = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, set(), set(), {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(report["orders"][0]["status"], "staged_for_review")
+                self.assertEqual(report["email_errors"], [])
+                self.assertEqual(report["details_email_sent"], [
+                    {"order": "W000400", "status": "staged_for_review"},
+                ])
+                self.assertEqual(download.call_count, 1)
+                stage.assert_called_once()
+                send.assert_called_once_with(
+                    root / "order.xls", {"Order Number": "000400"}, "irene@example.com",
+                    posco_status="staged_for_review", posco_reason="",
+                )
+                self.assertEqual(artifacts.komet.load_sent_order_keys(root / "details.json"), {key})
+
+                # A later run neither uploads nor sends this order again.
+                artifacts.transform_visible_orders(
+                    None, {key}, set(), {}, b"template", {"orders": [], "email_errors": []},
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(download.call_count, 1)
+                send.assert_called_once()
+                stage.assert_called_once()
+
+    def test_failed_status_mail_retries_without_restaging_order(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        key = "W000400|10/20/2026"
+        state = {"legacy_orders": set(), "staged_orders": {key}, "needs_review": set()}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email", side_effect=[RuntimeError("Graph failed"), None]) as send,
+                patch.object(artifacts.posco_import, "stage_workbook") as stage,
+            ):
+                sent_details = set()
+                first = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, {key}, set(), {}, b"template", first,
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(len(first["email_errors"]), 1)
+                self.assertNotIn(key, sent_details)
+                second = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, {key}, set(), {}, b"template", second,
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(second["email_errors"], [])
+                self.assertEqual(send.call_count, 2)
+                self.assertEqual(download.call_count, 2)
+                stage.assert_not_called()
+                self.assertEqual(artifacts.komet.load_sent_order_keys(root / "details.json"), {key})
+
+    def test_uncertain_posco_upload_sends_red_status_once_and_stops(self):
+        orders = [
+            {"order": "W000400", "date": "10/20/2026", "internal_id": "400"},
+            {"order": "W000401", "date": "10/21/2026", "internal_id": "401"},
+        ]
+        key = "W000400|10/20/2026"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", root / "transformed.json"),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", root / "stage.json"),
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=orders),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.transform, "parse_order_xls", return_value=({"order_number": "000400"}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["box"]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email") as send,
+                patch.object(artifacts.posco_import, "stage_workbook", side_effect=RuntimeError("timeout")) as stage,
+            ):
+                report = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, set(), set(), {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 21),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=set(),
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(len(report["orders"]), 1)
+                self.assertEqual(download.call_count, 1)
+                stage.assert_called_once()
+                send.assert_called_once_with(
+                    root / "order.xls", {"Order Number": "000400"}, "irene@example.com",
+                    posco_status="needs_manual_review",
+                    posco_reason="POSCO no confirmó la carga del archivo.",
+                )
+                self.assertEqual(state["needs_review"], {key})
+                self.assertEqual(artifacts.komet.load_sent_order_keys(root / "details.json"), {key})
+
+    def test_transient_download_error_leaves_details_mail_pending(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        key = "W000400|10/20/2026"
+        state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+        with (
+            patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+            patch.object(artifacts, "download_with_recovery", side_effect=RuntimeError("temporary network error")),
+            patch.object(artifacts.komet, "send_export_details_email") as send,
+        ):
+            report = {"orders": [], "email_errors": []}
+            sent_details = set()
+            artifacts.transform_visible_orders(
+                None, set(), set(), {}, b"template", report,
+                date(2026, 10, 9), date(2026, 10, 20),
+                stage_mode="all", stage_page=Mock(), stage_state=state,
+                mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                sent_invoice_keys={key},
+            )
+        self.assertEqual(report["orders"][0]["status"], "error")
+        self.assertEqual(report["email_errors"], [])
+        self.assertEqual(sent_details, set())
+        send.assert_not_called()
+
+    def test_homologation_error_mails_manual_status_with_reason(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        key = "W000400|10/20/2026"
+        state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.transform, "parse_order_xls", side_effect=artifacts.transform.TransformationError("Pack distinto")),
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email") as send,
+                patch.object(artifacts.posco_import, "stage_workbook") as stage,
+            ):
+                report = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, set(), set(), {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="all", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=set(),
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(report["orders"][0]["status"], "error")
+                self.assertEqual(download.call_count, 1)
+                stage.assert_not_called()
+                send.assert_called_once_with(
+                    root / "order.xls", {"Order Number": "000400"}, "irene@example.com",
+                    posco_status="error", posco_reason="Pack distinto",
+                )
+                self.assertEqual(artifacts.komet.load_sent_order_keys(root / "details.json"), {key})
+
+    def test_details_mail_waits_for_original_komet_documents(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        key = "W000400|10/20/2026"
+        state = {"legacy_orders": set(), "staged_orders": {key}, "needs_review": set()}
+        with (
+            patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+            patch.object(artifacts, "download_with_recovery") as download,
+            patch.object(artifacts.komet, "send_export_details_email") as send,
+        ):
+            artifacts.transform_visible_orders(
+                None, {key}, set(), {}, b"template", {"orders": [], "email_errors": []},
+                date(2026, 10, 9), date(2026, 10, 20),
+                stage_mode="all", stage_page=Mock(), stage_state=state,
+                mail_recipient="irene@example.com", sent_detail_keys=set(), sent_invoice_keys=set(),
+            )
+        download.assert_not_called()
+        send.assert_not_called()
+
     def test_all_mode_uploads_two_new_orders_sequentially(self):
         orders = [
             {"order": "W000400", "date": "10/20/2026", "internal_id": "400"},
