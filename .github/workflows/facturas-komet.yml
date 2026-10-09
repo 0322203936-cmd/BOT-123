@@ -84,7 +84,6 @@ jobs:
     needs: facturas-komet
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: true
     steps:
       - name: Descargar repositorio actualizado
         uses: actions/checkout@v4
@@ -123,7 +122,7 @@ jobs:
           retention-days: 7
 
       - name: Guardar bitácora separada de transformaciones
-        if: ${{ success() && steps.upload_posco.outcome == 'success' }}
+        if: ${{ always() && steps.upload_posco.outcome == 'success' }}
         run: |
           if [ -z "$(git status --porcelain -- bot/data/posco_transformados.json)" ]; then
             echo "No hay nuevas transformaciones POSCO para registrar."

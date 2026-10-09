@@ -1,9 +1,9 @@
 import io
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpyxl import Workbook, load_workbook
 
@@ -120,6 +120,60 @@ class PoscoTransformTests(unittest.TestCase):
         with self.assertRaisesRegex(TransformationError, "no de"):
             stage.verify_order_number("W000317", "000316")
 
+    def test_download_reopens_filtered_list_and_retries_after_timeout(self):
+        order = {"order": "W000317", "date": "10/12/2026", "internal_id": "317"}
+        page = Mock()
+        with (
+            patch.object(stage, "find_filtered_order", side_effect=[order, order]) as find,
+            patch.object(stage, "restore_filtered_orders") as restore,
+            patch.object(stage, "capture_download_error") as capture,
+            patch.object(stage.komet, "download_export_details", side_effect=[RuntimeError("download timeout"), Path("order.xls")]) as download,
+        ):
+            result = stage.download_with_recovery(page, order, 1, date(2026, 10, 9), date(2026, 10, 19))
+        self.assertEqual(result, Path("order.xls"))
+        self.assertEqual(find.call_count, 2)
+        self.assertEqual(download.call_count, 2)
+        restore.assert_called_once_with(page, date(2026, 10, 9), date(2026, 10, 19))
+        capture.assert_called_once()
+
+    def test_second_download_failure_is_reported_with_current_url(self):
+        order = {"order": "W000317", "date": "10/12/2026", "internal_id": "317"}
+        page = Mock(url="https://app.kometsales.com/orderSummary/other.do#st")
+        with (
+            patch.object(stage, "find_filtered_order", side_effect=[order, order]),
+            patch.object(stage, "restore_filtered_orders"),
+            patch.object(stage, "capture_download_error"),
+            patch.object(stage.komet, "download_export_details", side_effect=RuntimeError("no download")) as download,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "falló dos veces; URL actual"):
+                stage.download_with_recovery(page, order, 1, date(2026, 10, 9), date(2026, 10, 19))
+        self.assertEqual(download.call_count, 2)
+
+    def test_failed_first_download_does_not_skip_next_order(self):
+        orders = [
+            {"order": "W000307", "date": "10/09/2026", "internal_id": "307"},
+            {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            with (
+                patch.object(stage, "ARTIFACTS_DIR", output_dir),
+                patch.object(stage, "LEDGER_PATH", output_dir / "ledger.json"),
+                patch.object(stage.komet, "collect_order_rows", return_value=orders),
+                patch.object(stage.komet, "click_next_page", return_value=False),
+                patch.object(stage, "download_with_recovery", side_effect=[RuntimeError("no download"), Path("order.xls")]),
+                patch.object(stage.transform, "parse_order_xls", return_value=(self.details, [self.box])),
+                patch.object(stage.transform, "write_order_workbook", side_effect=lambda template, rows, path: path.write_bytes(b"xlsx")),
+            ):
+                report = {"orders": []}
+                ledger = set()
+                stage.transform_visible_orders(
+                    None, ledger, self.homologation, self.template, report,
+                    date(2026, 10, 9), date(2026, 10, 19),
+                )
+            self.assertEqual([item["status"] for item in report["orders"]], ["error", "generated"])
+            self.assertEqual(ledger, {"W000317|10/12/2026"})
+
     def test_stage_continues_after_one_bad_order_and_skips_success_on_retry(self):
         orders = [
             {"order": "W000307", "date": "10/09/2026", "internal_id": "307"},
@@ -148,7 +202,7 @@ class PoscoTransformTests(unittest.TestCase):
                 patch.object(stage, "ARTIFACTS_DIR", output_dir),
                 patch.object(stage, "LEDGER_PATH", ledger_path),
                 patch.object(stage.komet, "collect_order_rows", return_value=orders),
-                patch.object(stage.komet, "download_export_details", side_effect=downloaded),
+                patch.object(stage, "download_with_recovery", side_effect=lambda page, order, index, start, end: downloaded(page, order, index)),
                 patch.object(stage.komet, "click_next_page", return_value=False),
                 patch.object(stage.transform, "parse_order_xls", side_effect=parsed),
                 patch.object(stage.transform, "build_order_rows", side_effect=rows),
@@ -159,13 +213,13 @@ class PoscoTransformTests(unittest.TestCase):
             try:
                 ledger = set()
                 report = {"orders": []}
-                stage.transform_visible_orders(None, ledger, self.homologation, self.template, report)
+                stage.transform_visible_orders(None, ledger, self.homologation, self.template, report, date(2026, 10, 9), date(2026, 10, 19))
                 self.assertEqual([item["status"] for item in report["orders"]], ["error", "generated"])
                 self.assertEqual(load_transformed_keys(ledger_path), {"W000317|10/12/2026"})
                 self.assertEqual(len(list(output_dir.glob("*.xlsx"))), 1)
 
                 next_report = {"orders": []}
-                stage.transform_visible_orders(None, ledger, self.homologation, self.template, next_report)
+                stage.transform_visible_orders(None, ledger, self.homologation, self.template, next_report, date(2026, 10, 9), date(2026, 10, 19))
                 self.assertEqual([item["status"] for item in next_report["orders"]], ["error", "already_transformed"])
             finally:
                 for current in reversed(patches):
