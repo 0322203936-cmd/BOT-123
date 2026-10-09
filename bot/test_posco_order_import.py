@@ -57,6 +57,59 @@ class PoscoOrderImportTests(unittest.TestCase):
             posco_import.save_stage_state(path, state)
             self.assertEqual(posco_import.load_stage_state(path), state)
 
+    def test_replay_all_regenerates_old_orders_without_changing_ledgers_or_manual_orders(self):
+        orders = [
+            {"order": "000312", "date": "10/09/2026", "internal_id": "312"},
+            {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
+            {"order": "W000308", "date": "10/09/2026", "internal_id": "308"},
+        ]
+        legacy_key = "000312|10/09/2026"
+        staged_key = "W000317|10/12/2026"
+        manual_key = "W000308|10/09/2026"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger_path = root / "transformed.json"
+            stage_path = root / "stage.json"
+            ledger_path.write_text("existing transformation ledger", encoding="utf-8")
+            state = {"legacy_orders": {legacy_key}, "staged_orders": {staged_key}, "needs_review": set()}
+            posco_import.save_stage_state(stage_path, state)
+            original_stage = stage_path.read_bytes()
+            staged_orders = []
+
+            def stage_workbook(_page, _workbook, order_number, _screenshot):
+                staged_orders.append(order_number)
+                return "no_changes"
+
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", ledger_path),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", stage_path),
+                patch.object(artifacts, "collect_filtered_orders", return_value=orders),
+                patch.object(artifacts, "download_with_recovery", side_effect=lambda _p, order, *_: Path(order["order"] + ".xls")) as download,
+                patch.object(artifacts.transform, "parse_order_xls", side_effect=lambda path: ({"order_number": path.stem[-6:]}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["box"]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.transform, "save_transformed_keys") as save_transformed,
+                patch.object(artifacts.posco_import, "stage_workbook", side_effect=stage_workbook),
+            ):
+                report = {"orders": []}
+                artifacts.transform_visible_orders(
+                    None, {legacy_key, staged_key}, {manual_key}, {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 19),
+                    stage_mode="all", stage_page=Mock(), stage_state=state, replay_all=True,
+                )
+
+            self.assertEqual(staged_orders, ["000312", "W000317"])
+            self.assertEqual(download.call_count, 2)
+            self.assertEqual([item["status"] for item in report["orders"]], [
+                "already_in_posco", "already_in_posco", "manual",
+            ])
+            self.assertEqual(len(list(root.glob("*.xlsx"))), 2)
+            self.assertEqual(stage_path.read_bytes(), original_stage)
+            self.assertEqual(ledger_path.read_text(encoding="utf-8"), "existing transformation ledger")
+            self.assertEqual(state, {"legacy_orders": {legacy_key}, "staged_orders": {staged_key}, "needs_review": set()})
+            save_transformed.assert_not_called()
+
     def test_new_order_stages_but_old_order_is_skipped(self):
         orders = [
             {"order": "W000317", "date": "10/12/2026", "internal_id": "317"},
@@ -103,6 +156,22 @@ class PoscoOrderImportTests(unittest.TestCase):
                 None, {"W000400|10/20/2026"}, set(), {}, b"template", report,
                 date(2026, 10, 9), date(2026, 10, 20),
                 stage_mode="all", stage_page=Mock(), stage_state=state,
+            )
+        self.assertEqual(report["orders"][0]["status"], "needs_manual_review")
+        download.assert_not_called()
+
+    def test_replay_does_not_retry_an_uncertain_upload(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": {"W000400|10/20/2026"}}
+        with (
+            patch.object(artifacts, "collect_filtered_orders", return_value=[order]),
+            patch.object(artifacts, "download_with_recovery") as download,
+        ):
+            report = {"orders": []}
+            artifacts.transform_visible_orders(
+                None, set(), set(), {}, b"template", report,
+                date(2026, 10, 9), date(2026, 10, 20),
+                stage_mode="all", stage_page=Mock(), stage_state=state, replay_all=True,
             )
         self.assertEqual(report["orders"][0]["status"], "needs_manual_review")
         download.assert_not_called()
