@@ -145,19 +145,48 @@ def parse_export_details(path: Path) -> dict[str, str]:
     return values
 
 
-def export_details_email_config(details: dict[str, str], recipient: str) -> dict:
+POSCO_EMAIL_STATUSES = {
+    "staged_for_review": ("Archivo cargado para revisión en POSCO; pendiente de Actualizar.", "#9A6700"),
+    "already_staged": ("Archivo ya cargado para revisión en POSCO; pendiente de Actualizar.", "#9A6700"),
+    "already_in_posco": ("POSCO indicó Sin Cambios; no se pulsó Actualizar.", "#9A6700"),
+    "generated": ("Formato generado; todavía no cargado en POSCO.", "#9A6700"),
+    "already_transformed": ("Formato ya generado; carga en POSCO no confirmada.", "#B42318"),
+    "legacy": ("Estado previo en POSCO sin confirmación final; requiere revisión manual.", "#B42318"),
+    "manual": ("Requiere carga manual en POSCO.", "#B42318"),
+    "needs_manual_review": ("Carga no confirmada en POSCO; requiere revisión manual.", "#B42318"),
+    "error": ("No se pudo preparar o cargar en POSCO; requiere revisión manual.", "#B42318"),
+    "applied_confirmed": ("Orden actualizada y confirmada en POSCO.", "#137333"),
+}
+
+
+def export_details_email_config(
+    details: dict[str, str], recipient: str, *, posco_status: str | None = None,
+    posco_reason: str = "",
+) -> dict:
     order_number = details["Order Number"]
     rows = "".join(
         "<tr><th style='text-align:left;padding:6px 14px 6px 0'>"
         f"{escape(label)}:</th><td style='padding:6px 0'>{escape(details[label])}</td></tr>"
         for label in ("Order Number", "Customer", "Ship Date", "Carrier", "Location", "Created on")
     )
+    body = f"<p>Nueva Orden Komet: {escape(order_number)}</p><table>{rows}</table>"
+    if posco_status is not None:
+        try:
+            status_text, color = POSCO_EMAIL_STATUSES[posco_status]
+        except KeyError as error:
+            raise ValueError(f"Estado POSCO no reconocido: {posco_status}.") from error
+        body += (
+            f'<p style="font-weight:bold;color:{color}">'
+            f'Estado POSCO: {escape(status_text)}</p>'
+        )
+        if posco_reason:
+            body += f"<p>Motivo: {escape(normalize_space(posco_reason)[:300])}</p>"
     return {
         "recipients": [recipient],
         "cc": [],
         "bcc": [],
         "subject": f"Nueva Orden Komet: {order_number}",
-        "bodyHtml": f"<p>Nueva Orden Komet: {escape(order_number)}</p><table>{rows}</table>",
+        "bodyHtml": body,
         "logoUrl": "",
         "logoData": "",
         "logoName": "",
@@ -521,11 +550,17 @@ def download_export_details(page: Page, order: dict[str, str], index: int) -> Pa
     return destination
 
 
-def send_export_details_email(path: Path, details: dict[str, str], recipient: str) -> None:
+def send_export_details_email(
+    path: Path, details: dict[str, str], recipient: str, *, posco_status: str | None = None,
+    posco_reason: str = "",
+) -> None:
     # The shared Graph sender is reused without changing the inventory-boxes bot.
     from email_sender import send_report_email
 
-    send_report_email(export_details_email_config(details, recipient), required_secret("MAIL_SENDER"), path)
+    send_report_email(
+        export_details_email_config(details, recipient, posco_status=posco_status, posco_reason=posco_reason),
+        required_secret("MAIL_SENDER"), path,
+    )
 
 
 def process_export_details(

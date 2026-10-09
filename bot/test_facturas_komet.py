@@ -62,6 +62,28 @@ class ExportDetailsTests(unittest.TestCase):
         for field in self.details:
             self.assertIn(field, config["bodyHtml"])
 
+    def test_posco_review_is_amber_and_manual_failure_is_red(self):
+        review = export_details_email_config(
+            self.details, "irene@example.com", posco_status="staged_for_review",
+        )
+        self.assertIn("#9A6700", review["bodyHtml"])
+        self.assertIn("pendiente de Actualizar", review["bodyHtml"])
+        self.assertNotIn("actualizada y confirmada", review["bodyHtml"])
+
+        manual = export_details_email_config(
+            self.details, "irene@example.com", posco_status="error",
+            posco_reason="Pack < 10 & Stems no coincide",
+        )
+        self.assertIn("#B42318", manual["bodyHtml"])
+        self.assertIn("Pack &lt; 10 &amp; Stems", manual["bodyHtml"])
+
+    def test_green_status_requires_explicit_final_confirmation(self):
+        confirmed = export_details_email_config(
+            self.details, "irene@example.com", posco_status="applied_confirmed",
+        )
+        self.assertIn("#137333", confirmed["bodyHtml"])
+        self.assertIn("Orden actualizada y confirmada en POSCO", confirmed["bodyHtml"])
+
     def test_existing_original_email_does_not_block_one_new_detail_email(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = Path(directory) / "details.json"
