@@ -242,24 +242,40 @@ def write_order_workbook(template_bytes: bytes, rows: list[list], destination: P
         raise TransformationError("No se pudo crear o verificar el Excel POSCO.") from error
 
 
-def load_transformed_keys(path: Path) -> set[str]:
+def load_order_state(path: Path) -> tuple[set[str], set[str]]:
     if not path.exists():
-        return set()
+        return set(), set()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        keys = payload["transformed_orders"]
-        if payload.get("version") != 1 or not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
+        transformed = payload["transformed_orders"]
+        ignored = payload.get("ignored_orders", [])
+        if (
+            payload.get("version") != 1
+            or not isinstance(transformed, list)
+            or not isinstance(ignored, list)
+            or any(not isinstance(key, str) for key in transformed + ignored)
+            or set(transformed) & set(ignored)
+        ):
             raise ValueError("formato inválido")
-        return set(keys)
+        return set(transformed), set(ignored)
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise TransformationError("No se pudo leer la bitácora separada de transformaciones.") from error
 
 
+def load_transformed_keys(path: Path) -> set[str]:
+    return load_order_state(path)[0]
+
+
 def save_transformed_keys(keys: set[str], path: Path) -> None:
+    _, ignored = load_order_state(path)
+    if keys & ignored:
+        raise TransformationError("Una orden manual no puede marcarse como transformada.")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        json.dumps({"version": 1, "transformed_orders": sorted(keys)}, indent=2) + "\n",
+        json.dumps(
+            {"version": 1, "transformed_orders": sorted(keys), "ignored_orders": sorted(ignored)}, indent=2
+        ) + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)

@@ -12,6 +12,7 @@ from bot.posco_order_transform import (
     TransformationError,
     build_order_rows,
     load_homologation,
+    load_order_state,
     load_transformed_keys,
     save_transformed_keys,
     validate_template,
@@ -116,6 +117,34 @@ class PoscoTransformTests(unittest.TestCase):
             save_transformed_keys({"W000317|10/12/2026"}, path)
             self.assertEqual(load_transformed_keys(path), {"W000317|10/12/2026"})
 
+    def test_manual_order_stays_ignored_when_successful_orders_are_saved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "transformed.json"
+            path.write_text(
+                '{"version": 1, "transformed_orders": [], "ignored_orders": ["W000308|10/09/2026"]}',
+                encoding="utf-8",
+            )
+            save_transformed_keys({"W000317|10/12/2026"}, path)
+            self.assertEqual(load_order_state(path), (
+                {"W000317|10/12/2026"}, {"W000308|10/09/2026"},
+            ))
+
+    def test_manual_order_is_reported_without_download(self):
+        orders = [{"order": "W000308", "date": "10/09/2026", "internal_id": "308"}]
+        with (
+            patch.object(stage, "collect_filtered_orders", return_value=orders),
+            patch.object(stage, "download_with_recovery") as download,
+        ):
+            report = {"orders": []}
+            stage.transform_visible_orders(
+                None, set(), {"W000308|10/09/2026"}, self.homologation,
+                self.template, report, date(2026, 10, 9), date(2026, 10, 19),
+            )
+        download.assert_not_called()
+        self.assertEqual(report["orders"], [{
+            "order": "W000308", "key": "W000308|10/09/2026", "status": "manual",
+        }])
+
     def test_wrong_downloaded_order_is_rejected(self):
         with self.assertRaisesRegex(TransformationError, "no de"):
             stage.verify_order_number("W000317", "000316")
@@ -168,7 +197,7 @@ class PoscoTransformTests(unittest.TestCase):
                 report = {"orders": []}
                 ledger = set()
                 stage.transform_visible_orders(
-                    None, ledger, self.homologation, self.template, report,
+                    None, ledger, set(), self.homologation, self.template, report,
                     date(2026, 10, 9), date(2026, 10, 19),
                 )
             self.assertEqual([item["status"] for item in report["orders"]], ["error", "generated"])
@@ -213,13 +242,13 @@ class PoscoTransformTests(unittest.TestCase):
             try:
                 ledger = set()
                 report = {"orders": []}
-                stage.transform_visible_orders(None, ledger, self.homologation, self.template, report, date(2026, 10, 9), date(2026, 10, 19))
+                stage.transform_visible_orders(None, ledger, set(), self.homologation, self.template, report, date(2026, 10, 9), date(2026, 10, 19))
                 self.assertEqual([item["status"] for item in report["orders"]], ["error", "generated"])
                 self.assertEqual(load_transformed_keys(ledger_path), {"W000317|10/12/2026"})
                 self.assertEqual(len(list(output_dir.glob("*.xlsx"))), 1)
 
                 next_report = {"orders": []}
-                stage.transform_visible_orders(None, ledger, self.homologation, self.template, next_report, date(2026, 10, 9), date(2026, 10, 19))
+                stage.transform_visible_orders(None, ledger, set(), self.homologation, self.template, next_report, date(2026, 10, 9), date(2026, 10, 19))
                 self.assertEqual([item["status"] for item in next_report["orders"]], ["error", "already_transformed"])
             finally:
                 for current in reversed(patches):
