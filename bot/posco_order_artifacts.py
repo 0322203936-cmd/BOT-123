@@ -154,17 +154,21 @@ def transform_visible_orders(
                 stage_state["needs_review"].add(key)
                 posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
                 review_image = ARTIFACTS_DIR / f"{index:03d}_{komet.safe_filename(order['order'])}_posco_review.png"
-                posco_import.stage_workbook(
+                upload_result = posco_import.stage_workbook(
                     stage_page, destination, order["order"], review_image,
                 )
                 stage_state["needs_review"].remove(key)
                 stage_state["staged_orders"].add(key)
                 posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
                 report["orders"].append({
-                    "order": order["order"], "key": key, "status": "staged_for_review",
+                    "order": order["order"], "key": key,
+                    "status": "already_in_posco" if upload_result == "no_changes" else "staged_for_review",
                     "boxes": len(rows), "file": destination.name, "review_image": review_image.name,
                 })
-                print(f"POSCO {order['order']}: archivo cargado para revisión; Actualizar no se pulsó.", flush=True)
+                if upload_result == "no_changes":
+                    print(f"POSCO {order['order']}: Sin Cambios; ya existe en POSCO. Actualizar no se pulsó.", flush=True)
+                else:
+                    print(f"POSCO {order['order']}: archivo cargado para revisión; Actualizar no se pulsó.", flush=True)
                 continue
             report["orders"].append({
                 "order": order["order"], "key": key, "status": "generated",
