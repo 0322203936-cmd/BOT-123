@@ -12,15 +12,18 @@ from playwright.sync_api import sync_playwright
 
 if __package__:
     from . import facturas_komet as komet
+    from . import posco_order_import as posco_import
     from . import posco_order_transform as transform
 else:
     import facturas_komet as komet
+    import posco_order_import as posco_import
     import posco_order_transform as transform
 
 
 ARTIFACTS_DIR = Path("artifacts/facturas_komet/posco_orders")
 REPORT_PATH = ARTIFACTS_DIR / "report.json"
 LEDGER_PATH = Path(os.environ.get("KOMET_POSCO_TRANSFORMED_PATH", "bot/data/posco_transformados.json"))
+STAGE_LEDGER_PATH = Path(os.environ.get("KOMET_POSCO_STAGE_PATH", "bot/data/posco_cargas.json"))
 ORDERS_URL = "https://app.kometsales.com/orderSummary/list.do#st"
 
 
@@ -115,17 +118,31 @@ def download_with_recovery(
 
 def transform_visible_orders(
     page, ledger: set[str], ignored: set[str], lookup: dict, template: bytes, report: dict,
-    from_date: date, until_date: date,
+    from_date: date, until_date: date, *, stage_mode: str = "off", stage_page=None,
+    stage_state: dict[str, set[str]] | None = None, stage_order: str = "",
 ) -> None:
     orders = collect_filtered_orders(page)
+    staged_attempts = 0
     for index, order in enumerate(orders, start=1):
         key = komet.order_key(order)
-        if key in ledger:
-            report["orders"].append({"order": order["order"], "key": key, "status": "already_transformed"})
+        if stage_mode != "off" and stage_order and order["order"].strip().upper() != stage_order:
+            report["orders"].append({"order": order["order"], "key": key, "status": "outside_test_order"})
             continue
         if key in ignored:
             report["orders"].append({"order": order["order"], "key": key, "status": "manual"})
             print(f"POSCO {order['order']}: omitida por gestión manual.", flush=True)
+            continue
+        if stage_mode != "off":
+            assert stage_state is not None
+            stage_status = next((status for field, status in (
+                ("legacy_orders", "legacy"), ("staged_orders", "already_staged"),
+                ("needs_review", "needs_manual_review"),
+            ) if key in stage_state[field]), None)
+            if stage_status:
+                report["orders"].append({"order": order["order"], "key": key, "status": stage_status})
+                continue
+        elif key in ledger:
+            report["orders"].append({"order": order["order"], "key": key, "status": "already_transformed"})
             continue
         try:
             source = download_with_recovery(page, order, index, from_date, until_date)
@@ -134,8 +151,32 @@ def transform_visible_orders(
             rows = transform.build_order_rows(details, boxes, lookup)
             destination = ARTIFACTS_DIR / f"{index:03d}_{komet.safe_filename(order['order'])}.xlsx"
             transform.write_order_workbook(template, rows, destination)
-            transform.save_transformed_keys(ledger | {key}, LEDGER_PATH)
-            ledger.add(key)
+            if key not in ledger:
+                transform.save_transformed_keys(ledger | {key}, LEDGER_PATH)
+                ledger.add(key)
+            if stage_mode != "off":
+                if stage_mode == "single" and staged_attempts >= 1:
+                    report["orders"].append({
+                        "order": order["order"], "key": key, "status": "generated_pending_stage",
+                        "boxes": len(rows), "file": destination.name,
+                    })
+                    continue
+                staged_attempts += 1
+                stage_state["needs_review"].add(key)
+                posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
+                review_image = ARTIFACTS_DIR / f"{index:03d}_{komet.safe_filename(order['order'])}_posco_review.png"
+                posco_import.stage_workbook(
+                    stage_page, destination, order["order"], review_image,
+                )
+                stage_state["needs_review"].remove(key)
+                stage_state["staged_orders"].add(key)
+                posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
+                report["orders"].append({
+                    "order": order["order"], "key": key, "status": "staged_for_review",
+                    "boxes": len(rows), "file": destination.name, "review_image": review_image.name,
+                })
+                print(f"POSCO {order['order']}: archivo cargado para revisión; Actualizar no se pulsó.", flush=True)
+                continue
             report["orders"].append({
                 "order": order["order"], "key": key, "status": "generated",
                 "boxes": len(rows), "file": destination.name,
@@ -146,10 +187,19 @@ def transform_visible_orders(
                 "order": order["order"], "key": key, "status": "error", "error": str(error),
             })
             print(f"ERROR POSCO {order['order']}: {error}", flush=True)
+            if stage_mode == "all" and stage_state is not None and key in stage_state["needs_review"]:
+                print("POSCO: carga sin confirmar; se detienen las siguientes para revisión manual.", flush=True)
+                break
 
 
 def run() -> dict:
     from_date, until_date = komet.komet_dates()
+    stage_mode = os.environ.get("KOMET_POSCO_STAGE_MODE", "off").strip().lower()
+    stage_order = os.environ.get("KOMET_POSCO_STAGE_ORDER", "").strip().upper()
+    if stage_mode not in {"off", "single", "all"}:
+        raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off, single o all.")
+    if stage_mode == "off" and stage_order:
+        raise ValueError("KOMET_POSCO_STAGE_ORDER requiere habilitar KOMET_POSCO_STAGE_MODE.")
     report = {
         "from": from_date.isoformat(), "until": until_date.isoformat(),
         "orders": [], "global_error": None,
@@ -157,6 +207,7 @@ def run() -> dict:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         ledger, ignored = transform.load_order_state(LEDGER_PATH)
+        stage_state = posco_import.load_stage_state(STAGE_LEDGER_PATH) if stage_mode != "off" else None
         lookup = transform.load_homologation(transform.secret_workbook("KOMET_POSCO_MAPPING_B64"))
         template = transform.secret_workbook("KOMET_POSCO_TEMPLATE_B64")
         transform.validate_template(template)
@@ -174,7 +225,17 @@ def run() -> dict:
                 # Match the proven second filter/search pass in the mail flow.
                 komet.fill_order_dates(page, from_date, until_date)
                 komet.search_orders(page)
-                transform_visible_orders(page, ledger, ignored, lookup, template, report, from_date, until_date)
+                stage_page = None
+                if stage_mode != "off":
+                    stage_page = context.new_page()
+                    posco_import.open_import_screen(
+                        stage_page, komet.required_secret("POSCO_USER"), komet.required_secret("POSCO_PASSWORD")
+                    )
+                transform_visible_orders(
+                    page, ledger, ignored, lookup, template, report, from_date, until_date,
+                    stage_mode=stage_mode, stage_page=stage_page, stage_state=stage_state,
+                    stage_order=stage_order,
+                )
             finally:
                 context.close()
                 browser.close()
@@ -185,6 +246,7 @@ def run() -> dict:
         report["generated"] = sum(item["status"] == "generated" for item in report["orders"])
         report["errors"] = sum(item["status"] == "error" for item in report["orders"])
         report["manual"] = sum(item["status"] == "manual" for item in report["orders"])
+        report["staged_for_review"] = sum(item["status"] == "staged_for_review" for item in report["orders"])
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(
             f"POSCO: {report['generated']} archivo(s), {report['errors']} error(es), "
