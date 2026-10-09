@@ -356,8 +356,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
                 self.assertEqual(result.active["B2"].value.date(), date(2026, 9, 14))
                 self.assertEqual(result.active["B2"].number_format, DATE_NUMBER_FORMAT)
-                self.assertEqual(result.active["A3"].value, "Day of Dead Sampler")
-                self.assertEqual(result.active["A4"].value, "Greens Sampler")
+                self.assertEqual(result.active["A3"].value, "Day of Dead Mixed Box")
+                self.assertEqual(result.active["A4"].value, "California Greens Mixed Box")
             finally:
                 result.close()
 

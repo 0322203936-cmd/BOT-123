@@ -1344,14 +1344,9 @@ def create_single_sheet_workbook(
             raise RuntimeError(f"El libro no contiene la pestaña requerida {sheet_name}.")
         target_sheet = workbook[sheet_name]
         if sheet_name == KOMET_SHEET_NAME and normalize_available_from_dates:
-            header_row, product_column, date_column = _header_columns(target_sheet)
+            header_row, _, date_column = _header_columns(target_sheet)
             normalized_dates = 0
             for row in range(header_row + 1, target_sheet.max_row + 1):
-                product_cell = target_sheet.cell(row=row, column=product_column + 1)
-                product_cell.value = {
-                    "Day of Dead Mixed Box": "Day of Dead Sampler",
-                    "California Greens Mixed Box": "Greens Sampler",
-                }.get(product_cell.value, product_cell.value)
                 cell = target_sheet.cell(row=row, column=date_column + 1)
                 if cell.value in (None, ""):
                     continue
