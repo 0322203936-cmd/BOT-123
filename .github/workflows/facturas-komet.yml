@@ -2,21 +2,6 @@ name: Bot Facturas Komet - Prueba
 
 on:
   workflow_dispatch:
-    inputs:
-      posco_stage_mode:
-        description: "Carga de Excel POSCO para revisión (sin pulsar Actualizar)"
-        type: choice
-        required: true
-        default: "off"
-        options:
-          - "off"
-          - "single"
-          - "all"
-      posco_stage_order:
-        description: "Opcional: limitar la prueba a una orden, por ejemplo W000317"
-        type: string
-        required: false
-        default: ""
 
 concurrency:
   group: kometsales-facturas-prueba
@@ -124,8 +109,7 @@ jobs:
           KOMET_TIMEZONE: America/Tijuana
           KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
           KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
-          KOMET_POSCO_STAGE_MODE: ${{ inputs.posco_stage_mode || 'off' }}
-          KOMET_POSCO_STAGE_ORDER: ${{ inputs.posco_stage_order || '' }}
+          KOMET_POSCO_STAGE_MODE: all
           POSCO_USER: ${{ secrets.POSCO_USER }}
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
         run: python -u bot/posco_order_artifacts.py
