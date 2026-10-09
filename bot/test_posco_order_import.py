@@ -46,6 +46,23 @@ class PoscoOrderImportTests(unittest.TestCase):
             page.screenshot.assert_called_once()
             self.assertNotIn('name="Actualizar"', str(page.mock_calls))
 
+    def test_next_workbook_returns_to_import_screen_after_confirmed_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "next-order.xlsx"
+            workbook.write_bytes(b"xlsx")
+            page = Mock()
+            page.url = posco_import.POSCO_URL + "#/list-orden-detalle"
+            page.get_by_text("Sin Cambios", exact=True).is_visible.return_value = False
+            result = posco_import.stage_workbook(page, workbook, "W000401", Path(directory) / "review.png")
+            self.assertEqual(result, "uploaded")
+            page.goto.assert_called_once_with(
+                posco_import.POSCO_URL + "#/revisar-ordenes",
+                wait_until="domcontentloaded", timeout=60_000,
+            )
+            page.get_by_role("button", name="Revisar Archivo").wait_for.assert_any_call(
+                state="visible", timeout=30_000,
+            )
+
     def test_stage_ledger_preserves_legacy_and_uncertain_orders(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stage.json"
@@ -56,6 +73,50 @@ class PoscoOrderImportTests(unittest.TestCase):
             }
             posco_import.save_stage_state(path, state)
             self.assertEqual(posco_import.load_stage_state(path), state)
+
+    def test_stage_ledger_accepts_confirmed_orders_without_losing_old_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stage.json"
+            state = {
+                "legacy_orders": set(), "staged_orders": {"W000317|10/12/2026"},
+                "needs_review": set(), "applied_orders": {"W000400|10/20/2026"},
+            }
+            posco_import.save_stage_state(path, state)
+            self.assertEqual(posco_import.load_stage_state(path), state)
+
+    def test_apply_requires_matching_order_and_selected_rows_then_success_navigation(self):
+        page = Mock()
+        identifier = "CUSTOMER - FTD 000400"
+        page.get_by_role("cell", name=identifier, exact=True).count.return_value = 2
+        page.get_by_text.return_value.inner_text.return_value = "2 ordenes seleccionadas"
+        page.get_by_role("button", name="Actualizar", exact=True).is_enabled.return_value = True
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "confirmed.png"
+            posco_import.apply_staged_workbook(page, identifier, 2, image)
+            page.get_by_role("button", name="Actualizar", exact=True).click.assert_called_once()
+            page.wait_for_url.assert_called_once()
+            self.assertIn("list-orden-detalle", page.wait_for_url.call_args.args[0].pattern)
+            page.screenshot.assert_called_once_with(path=str(image), full_page=True, timeout=15_000)
+
+    def test_apply_never_clicks_when_the_review_is_not_exactly_this_order(self):
+        page = Mock()
+        page.get_by_role("cell", name="CUSTOMER - FTD 000400", exact=True).count.return_value = 1
+        with self.assertRaisesRegex(RuntimeError, "se esperaban 2"):
+            posco_import.apply_staged_workbook(page, "CUSTOMER - FTD 000400", 2, Path("unused.png"))
+        page.get_by_role("button", name="Actualizar", exact=True).click.assert_not_called()
+
+    def test_apply_requires_posco_success_callback_not_just_a_click(self):
+        page = Mock()
+        page.get_by_role("cell", name="CUSTOMER - FTD 000400", exact=True).count.return_value = 1
+        page.get_by_text.return_value.inner_text.return_value = "1 ordenes seleccionadas"
+        page.get_by_role("button", name="Actualizar", exact=True).is_enabled.return_value = True
+        page.wait_for_url.side_effect = TimeoutError("Sin confirmación")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(TimeoutError, "Sin confirmación"):
+                posco_import.apply_staged_workbook(
+                    page, "CUSTOMER - FTD 000400", 1, Path(directory) / "uncertain.png",
+                )
+        page.get_by_role("button", name="Actualizar", exact=True).click.assert_called_once()
 
     def test_cleared_stage_ledger_regenerates_old_orders_but_skips_manual(self):
         orders = [
@@ -212,6 +273,103 @@ class PoscoOrderImportTests(unittest.TestCase):
                 self.assertEqual(download.call_count, 1)
                 send.assert_called_once()
                 stage.assert_called_once()
+
+    def test_apply_mode_confirms_new_order_and_sends_green_status_once(self):
+        order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}
+        previous = {"order": "W000317", "date": "10/12/2026", "internal_id": "317"}
+        key = "W000400|10/20/2026"
+        identifier = "CUSTOMER - FTD 000400"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = {"legacy_orders": set(), "staged_orders": {"W000317|10/12/2026"}, "needs_review": set()}
+            sent_details = set()
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", root / "transformed.json"),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", root / "stage.json"),
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=[previous, order]),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.transform, "parse_order_xls", return_value=({"order_number": "000400"}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["a", "b", "c", identifier]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email") as send,
+                patch.object(artifacts.posco_import, "stage_workbook", return_value="uploaded") as stage,
+                patch.object(artifacts.posco_import, "apply_staged_workbook") as apply,
+            ):
+                report = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, set(), set(), {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="apply", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual([item["status"] for item in report["orders"]], ["already_staged", "applied_confirmed"])
+                self.assertEqual(state["applied_orders"], {key})
+                self.assertEqual(state["staged_orders"], {"W000317|10/12/2026"})
+                self.assertEqual(state["needs_review"], set())
+                self.assertEqual(posco_import.load_stage_state(root / "stage.json"), state)
+                apply.assert_called_once()
+                self.assertEqual(apply.call_args.args[1:3], (identifier, 1))
+                send.assert_called_once_with(
+                    root / "order.xls", {"Order Number": "000400"}, "irene@example.com",
+                    posco_status="applied_confirmed", posco_reason="",
+                )
+
+                artifacts.transform_visible_orders(
+                    None, {key}, set(), {}, b"template", {"orders": [], "email_errors": []},
+                    date(2026, 10, 9), date(2026, 10, 20),
+                    stage_mode="apply", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=sent_details,
+                    sent_invoice_keys={key},
+                )
+                download.assert_called_once()
+                stage.assert_called_once()
+                apply.assert_called_once()
+                send.assert_called_once()
+
+    def test_unconfirmed_apply_is_red_manual_review_and_stops_next_order(self):
+        orders = [
+            {"order": "W000400", "date": "10/20/2026", "internal_id": "400"},
+            {"order": "W000401", "date": "10/21/2026", "internal_id": "401"},
+        ]
+        key = "W000400|10/20/2026"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = {"legacy_orders": set(), "staged_orders": set(), "needs_review": set()}
+            with (
+                patch.object(artifacts, "ARTIFACTS_DIR", root),
+                patch.object(artifacts, "LEDGER_PATH", root / "transformed.json"),
+                patch.object(artifacts, "STAGE_LEDGER_PATH", root / "stage.json"),
+                patch.object(artifacts.komet, "SENT_EXPORT_DETAILS_PATH", root / "details.json"),
+                patch.object(artifacts, "collect_filtered_orders", return_value=orders),
+                patch.object(artifacts, "download_with_recovery", return_value=root / "order.xls") as download,
+                patch.object(artifacts.transform, "parse_order_xls", return_value=({"order_number": "000400"}, [{}])),
+                patch.object(artifacts.transform, "build_order_rows", return_value=[["a", "b", "c", "CUSTOMER - FTD 000400"]]),
+                patch.object(artifacts.transform, "write_order_workbook", side_effect=lambda _t, _r, path: path.write_bytes(b"xlsx")),
+                patch.object(artifacts.komet, "parse_export_details", return_value={"Order Number": "000400"}),
+                patch.object(artifacts.komet, "send_export_details_email") as send,
+                patch.object(artifacts.posco_import, "stage_workbook", return_value="uploaded"),
+                patch.object(artifacts.posco_import, "apply_staged_workbook", side_effect=TimeoutError("Sin confirmación")) as apply,
+            ):
+                report = {"orders": [], "email_errors": []}
+                artifacts.transform_visible_orders(
+                    None, set(), set(), {}, b"template", report,
+                    date(2026, 10, 9), date(2026, 10, 21),
+                    stage_mode="apply", stage_page=Mock(), stage_state=state,
+                    mail_recipient="irene@example.com", sent_detail_keys=set(),
+                    sent_invoice_keys={key},
+                )
+                self.assertEqual(len(report["orders"]), 1)
+                self.assertEqual(report["orders"][0]["status"], "error")
+                self.assertEqual(state["needs_review"], {key})
+                self.assertEqual(state["applied_orders"], set())
+                self.assertEqual(download.call_count, 1)
+                apply.assert_called_once()
+                send.assert_called_once()
+                self.assertEqual(send.call_args.kwargs["posco_status"], "needs_manual_review")
 
     def test_failed_status_mail_retries_without_restaging_order(self):
         order = {"order": "W000400", "date": "10/20/2026", "internal_id": "400"}

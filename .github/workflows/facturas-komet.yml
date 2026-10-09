@@ -101,14 +101,14 @@ jobs:
           pip install -r bot/requirements.txt
           playwright install --with-deps chromium
 
-      - name: Generar Excel POSCO y, si se habilita, cargarlos solo para revisión
+      - name: Generar Excel POSCO y actualizar únicamente órdenes nuevas
         env:
           KOMET_USER: ${{ secrets.KOMET_USER }}
           KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
           KOMET_TIMEZONE: America/Tijuana
           KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
           KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
-          KOMET_POSCO_STAGE_MODE: all
+          KOMET_POSCO_STAGE_MODE: apply
           KOMET_ORDER_DETAILS_EMAIL: Irene.Machain@Pacifica-farms.com
           POSCO_USER: ${{ secrets.POSCO_USER }}
           POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}

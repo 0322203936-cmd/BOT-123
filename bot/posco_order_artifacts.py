@@ -1,4 +1,4 @@
-"""Independent, review-only artifact pass after the Facturas Komet job."""
+"""Independent POSCO order pass after the Facturas Komet documents job."""
 
 from __future__ import annotations
 
@@ -174,10 +174,13 @@ def transform_visible_orders(
             continue
         if stage_mode != "off":
             assert stage_state is not None
+            if stage_mode == "apply":
+                stage_state.setdefault("applied_orders", set())
             stage_status = next((status for field, status in (
                 ("legacy_orders", "legacy"), ("staged_orders", "already_staged"),
+                ("applied_orders", "applied_confirmed"),
                 ("needs_review", "needs_manual_review"),
-            ) if key in stage_state[field]), None)
+            ) if key in stage_state.get(field, set())), None)
             if stage_status:
                 report["orders"].append({"order": order["order"], "key": key, "status": stage_status})
                 mail_after_status(stage_status)
@@ -203,6 +206,20 @@ def transform_visible_orders(
                 upload_result = posco_import.stage_workbook(
                     stage_page, destination, order["order"], review_image,
                 )
+                if stage_mode == "apply" and upload_result == "uploaded":
+                    applied_image = ARTIFACTS_DIR / f"{index:03d}_{komet.safe_filename(order['order'])}_posco_applied.png"
+                    posco_import.apply_staged_workbook(stage_page, rows[0][3], len(rows), applied_image)
+                    stage_state["needs_review"].remove(key)
+                    stage_state["applied_orders"].add(key)
+                    posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
+                    report["orders"].append({
+                        "order": order["order"], "key": key, "status": "applied_confirmed",
+                        "boxes": len(rows), "file": destination.name,
+                        "review_image": review_image.name, "applied_image": applied_image.name,
+                    })
+                    print(f"POSCO {order['order']}: Ordenes Actualizadas; confirmada en POSCO.", flush=True)
+                    mail_after_status("applied_confirmed")
+                    continue
                 stage_state["needs_review"].remove(key)
                 stage_state["staged_orders"].add(key)
                 posco_import.save_stage_state(STAGE_LEDGER_PATH, stage_state)
@@ -235,7 +252,7 @@ def transform_visible_orders(
                 mail_after_status("error", str(error))
             # Transient download/network errors leave the email pending until a later run
             # can determine a truthful POSCO outcome.
-            if stage_mode == "all" and uncertain_upload:
+            if stage_mode in {"all", "apply"} and uncertain_upload:
                 print("POSCO: carga sin confirmar; se detienen las siguientes para revisión manual.", flush=True)
                 break
 
@@ -243,8 +260,8 @@ def transform_visible_orders(
 def run() -> dict:
     from_date, until_date = komet.komet_dates()
     stage_mode = os.environ.get("KOMET_POSCO_STAGE_MODE", "off").strip().lower()
-    if stage_mode not in {"off", "all"}:
-        raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off o all.")
+    if stage_mode not in {"off", "all", "apply"}:
+        raise ValueError("KOMET_POSCO_STAGE_MODE debe ser off, all o apply.")
     report = {
         "from": from_date.isoformat(), "until": until_date.isoformat(),
         "orders": [], "global_error": None, "details_email_sent": [], "email_errors": [],
@@ -296,9 +313,11 @@ def run() -> dict:
         report["errors"] = sum(item["status"] == "error" for item in report["orders"])
         report["manual"] = sum(item["status"] == "manual" for item in report["orders"])
         report["staged_for_review"] = sum(item["status"] == "staged_for_review" for item in report["orders"])
+        report["applied_confirmed"] = sum(item["status"] == "applied_confirmed" for item in report["orders"])
         REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(
-            f"POSCO: {report['generated']} archivo(s), {report['errors']} error(es), "
+            f"POSCO: {report['generated']} archivo(s), {report['applied_confirmed']} confirmada(s), "
+            f"{report['errors']} error(es), "
             f"{sum(item['status'] == 'already_transformed' for item in report['orders'])} ya transformadas, "
             f"{report['manual']} de gestión manual, "
             f"{len(report['details_email_sent'])} correo(s) Order Details enviados.",
