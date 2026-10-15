@@ -126,21 +126,33 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_mayor_five_months(page: Page) -> tuple[date, date]:
-    """Keep Load Date Menor as POSCO set it; extend only Mayor to today + 5 months."""
+def set_load_date_last_five_months(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from five calendar months ago through today."""
     today = datetime.now(BOT_TIMEZONE).date()
-    end_date = add_calendar_months(today, 5)
+    start_date = add_calendar_months(today, -5)
+    menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
-    input_type = (mayor.get_attribute("type") or "text").lower()
-    formatted = end_date.isoformat() if input_type == "date" else end_date.strftime("%m/%d/%Y")
-    mayor.fill(formatted)
+    menor_input_type = (menor.get_attribute("type") or "text").lower()
+    mayor_input_type = (mayor.get_attribute("type") or "text").lower()
+    start_formatted = (
+        start_date.isoformat()
+        if menor_input_type == "date"
+        else start_date.strftime("%m/%d/%Y")
+    )
+    end_formatted = (
+        today.isoformat()
+        if mayor_input_type == "date"
+        else today.strftime("%m/%d/%Y")
+    )
+    menor.fill(start_formatted)
+    mayor.fill(end_formatted)
     mayor.press("Tab")
     print(
-        f"Load Date Menor se conserva; Load Date Mayor={end_date.isoformat()} "
-        f"(hoy {today.isoformat()} + 5 meses calendario).",
+        f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={today.isoformat()} "
+        f"(últimos 5 meses calendario).",
         flush=True,
     )
-    return today, end_date
+    return start_date, today
 
 
 def click_search(page: Page) -> None:
@@ -216,8 +228,8 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cinco meses...", flush=True)
-            today, end_date = set_load_date_mayor_five_months(page)
+            print("Filtrando Load Date de los últimos cinco meses hasta hoy...", flush=True)
+            start_date, end_date = set_load_date_last_five_months(page)
             capture(page, "05_rango_hasta_cinco_meses.png")
             click_search(page)
             try:
@@ -236,8 +248,8 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_5_MESES_OK inicio_posco_sin_cambios=true "
-                f"hoy={today.isoformat()} load_date_mayor={end_date.isoformat()} reporte={report}",
+                f"EXPORTAR_5_MESES_OK load_date_menor={start_date.isoformat()} "
+                f"load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
         except Exception:
