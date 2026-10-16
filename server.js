@@ -143,6 +143,9 @@ const workflows = {
 };
 
 const lastDispatch = new Map();
+const WORKFLOW_CACHE_TTL_MS = 30_000;
+let workflowCache = null;
+let workflowCacheAt = 0;
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
 const cajasMassEmailVariable = 'CAJAS_MASS_EMAIL_CONFIG';
 const graphUrl = 'https://graph.microsoft.com/v1.0';
@@ -896,6 +899,8 @@ async function dispatchWorkflow(key) {
 
   const dispatchedAt = Date.now();
   lastDispatch.set(key, dispatchedAt);
+  workflowCache = null;
+  workflowCacheAt = 0;
   return {
     message: `${workflow.name} fue enviado correctamente a GitHub.`,
     dispatchedAt: new Date(dispatchedAt).toISOString(),
@@ -980,6 +985,11 @@ app.put('/api/workflows/cajas/mass-email-config', requireWriteAuthentication, as
 });
 
 app.get('/api/workflows', authenticate, async (_req, res, next) => {
+  const now = Date.now();
+  if (workflowCache && now - workflowCacheAt < WORKFLOW_CACHE_TTL_MS) {
+    return res.json(workflowCache);
+  }
+
   try {
     const entries = await Promise.all(
       Object.entries(workflows).map(async ([key, workflow]) => {
@@ -1015,8 +1025,27 @@ app.get('/api/workflows', authenticate, async (_req, res, next) => {
         };
       }),
     );
-    res.json({ workflows: entries });
+    workflowCache = { workflows: entries };
+    workflowCacheAt = Date.now();
+    res.json(workflowCache);
   } catch (error) {
+    // GitHub can temporarily rate-limit the status requests. Do not turn
+    // that temporary condition into an empty panel: the workflow catalog is
+    // local and the bots still exist. Dispatches continue to surface a clear
+    // error until GitHub accepts requests again.
+    if (/api rate limit exceeded/i.test(error.message || '')) {
+      const fallback = workflowCache || {
+        workflows: Object.entries(workflows).map(([key, workflow]) => ({
+          key,
+          name: workflow.name,
+          description: workflow.description,
+          schedule: workflow.schedule,
+          run: null,
+        })),
+      };
+      res.setHeader('X-Atajos-Workflow-Source', 'catalog-fallback');
+      return res.json(fallback);
+    }
     next(error);
   }
 });
