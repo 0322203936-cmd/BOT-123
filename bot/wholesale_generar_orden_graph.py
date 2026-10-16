@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import posixpath
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -199,7 +200,8 @@ def _target_worksheet_path(workbook_xml: str, relationships_xml: str) -> str:
         raise RuntimeError(f"No se pudo resolver el XML de la hoja {TARGET_SHEET!r}.")
     relationship_id = sheet_match.group(1)
     relationship = re.search(
-        rf'<(?:[A-Za-z0-9_]+:)?Relationship\b[^>]*\bId="{re.escape(relationship_id)}"[^>]*\bTarget="([^"]+)"',
+        rf'<(?:[A-Za-z0-9_]+:)?Relationship\b(?=[^>]*\bId="{re.escape(relationship_id)}")'
+        r'(?=[^>]*\bTarget="([^"]+)")[^>]*/>',
         relationships_xml,
     )
     if not relationship:
@@ -321,22 +323,128 @@ def _read_order_metadata(source: Path) -> dict[str, str]:
         values_workbook.close()
 
 
-def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
-    """Create a macro-free PDF copy without rebuilding workbook visuals.
+def _relationship_part_path(part_path: str, relationship_target: str) -> str:
+    """Resolve an XLSX relationship target relative to its owning part."""
+    relationship_target = relationship_target.lstrip("/")
+    if relationship_target.startswith("xl/"):
+        return relationship_target
+    return posixpath.normpath(
+        posixpath.join(posixpath.dirname(part_path), relationship_target)
+    )
 
-    ``openpyxl.save`` rewrites the drawing package and can remove Excel
-    objects that it does not understand.  In this workbook that meant the
-    Pacifica logo disappeared.  Patch the original package at ZIP level, then
-    only strip VBA from the temporary copy: drawings, images, print layout and
-    cached formulas remain byte-for-byte intact.
+
+def _worksheet_relationships_path(worksheet_path: str) -> str:
+    return (
+        f"{posixpath.dirname(worksheet_path)}/_rels/"
+        f"{posixpath.basename(worksheet_path)}.rels"
+    )
+
+
+def _drawing_relationship(xml: str) -> tuple[str, str] | None:
+    match = re.search(
+        r'<(?:[A-Za-z0-9_]+:)?Relationship\b(?=[^>]*\bType="[^"]*/drawing")'
+        r'(?=[^>]*\bId="([^"]+)")(?=[^>]*\bTarget="([^"]+)")[^>]*/>',
+        xml,
+    )
+    return (match.group(1), match.group(2)) if match else None
+
+
+def _preserve_target_drawing(source: Path, destination: Path) -> None:
+    """Restore the original drawing XML after ``openpyxl`` rewrites it.
+
+    The original PO sheet contains native drawing markup for the Pacifica logo.
+    ``openpyxl`` keeps the bitmap but rewrites that markup; Microsoft Graph's
+    PDF renderer then omits the image.  We keep the safe XLSX package written
+    by openpyxl and replace only its already-supported drawing part.
     """
+    with ZipFile(source, "r") as source_zip, ZipFile(destination, "r") as clean_zip:
+        source_workbook = source_zip.read("xl/workbook.xml").decode("utf-8")
+        source_relationships = source_zip.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        clean_workbook = clean_zip.read("xl/workbook.xml").decode("utf-8")
+        clean_relationships = clean_zip.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        source_sheet_path = _target_worksheet_path(source_workbook, source_relationships)
+        clean_sheet_path = _target_worksheet_path(clean_workbook, clean_relationships)
+        source_sheet_rels_path = _worksheet_relationships_path(source_sheet_path)
+        clean_sheet_rels_path = _worksheet_relationships_path(clean_sheet_path)
+        if source_sheet_rels_path not in source_zip.namelist() or clean_sheet_rels_path not in clean_zip.namelist():
+            return
+        source_drawing = _drawing_relationship(
+            source_zip.read(source_sheet_rels_path).decode("utf-8")
+        )
+        clean_drawing = _drawing_relationship(
+            clean_zip.read(clean_sheet_rels_path).decode("utf-8")
+        )
+        if not source_drawing or not clean_drawing:
+            return
+        _, source_drawing_target = source_drawing
+        _, clean_drawing_target = clean_drawing
+        source_drawing_path = _relationship_part_path(source_sheet_path, source_drawing_target)
+        clean_drawing_path = _relationship_part_path(clean_sheet_path, clean_drawing_target)
+        source_drawing_rels_path = _worksheet_relationships_path(source_drawing_path)
+        clean_drawing_rels_path = _worksheet_relationships_path(clean_drawing_path)
+        replacements = {
+            clean_drawing_path: source_zip.read(source_drawing_path),
+            clean_drawing_rels_path: source_zip.read(source_drawing_rels_path),
+        }
+        source_drawing_rels = source_zip.read(source_drawing_rels_path).decode("utf-8")
+        for target in re.findall(r'\bTarget="([^"]+)"', source_drawing_rels):
+            source_part = _relationship_part_path(source_drawing_path, target)
+            clean_part = _relationship_part_path(clean_drawing_path, target)
+            if source_part in source_zip.namelist():
+                replacements[clean_part] = source_zip.read(source_part)
+
+        temporary = destination.with_suffix(".drawing-tmp.xlsx")
+        try:
+            with ZipFile(temporary, "w") as output_zip:
+                for info in clean_zip.infolist():
+                    output_zip.writestr(info, replacements.get(info.filename, clean_zip.read(info.filename)))
+            # Windows does not allow replacing an archive that is still open.
+            clean_zip.close()
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
+    """Create a Graph-compatible copy while keeping the original logo."""
     metadata = _read_order_metadata(source)
-    layout_copy = destination.with_suffix(".xlsm")
+    workbook = load_workbook(
+        source,
+        data_only=False,
+        keep_vba=False,
+        keep_links=False,
+    )
+    values_workbook = load_workbook(
+        source,
+        data_only=True,
+        keep_vba=False,
+        keep_links=False,
+    )
     try:
-        prepare_pdf_copy(source, layout_copy)
-        prepare_pdf_xlsx_copy(layout_copy, destination)
+        if TARGET_SHEET not in workbook.sheetnames or TARGET_SHEET not in values_workbook.sheetnames:
+            raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
+        values_sheet = values_workbook[TARGET_SHEET]
+        for candidate in workbook.worksheets:
+            if candidate.title != TARGET_SHEET:
+                candidate.sheet_state = "hidden"
+        sheet = workbook[TARGET_SHEET]
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.data_type == "f":
+                    cached_value = values_sheet[cell.coordinate].value
+                    if cached_value is not None:
+                        cell.value = cached_value
+        sheet.print_area = PRINT_AREA
+        sheet.page_setup.orientation = "portrait"
+        sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
+        workbook.active = workbook.index(sheet)
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+        workbook.save(destination)
     finally:
-        layout_copy.unlink(missing_ok=True)
+        workbook.close()
+        values_workbook.close()
+    _preserve_target_drawing(source, destination)
     return metadata
 
 
