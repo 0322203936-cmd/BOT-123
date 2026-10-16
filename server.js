@@ -123,6 +123,15 @@ const workflows = {
     description: 'Abre el libro Wholesale de SharePoint y ejecuta el mismo botón Generar Orden del Excel.',
     schedule: 'Ejecución manual',
   },
+  wholesaleGenerarPassingSheet: {
+    owner,
+    repo: process.env.WHOLESALE_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'wholesale-generar-passing-sheet.yml',
+    name: 'Ejecutar Generar Passing Sheet',
+    description: 'Genera el PDF de la hoja Passing Sheet del libro Wholesale con Microsoft Graph.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();
@@ -189,6 +198,9 @@ const reportMatchers = {
   wholesaleGenerarOrden: [
     (name) => /(^|\/)generar-orden\.pdf$/i.test(name),
   ],
+  wholesaleGenerarPassingSheet: [
+    (name) => /(^|\/)passing-sheet\.pdf$/i.test(name),
+  ],
 };
 
 const artifactNameMatchers = {
@@ -215,6 +227,7 @@ const artifactNameMatchers = {
   cajas: [(name) => name.startsWith('reportes-inventory-boxes-')],
   facturasKomet: [(name) => name.startsWith('reportes-facturas-komet-')],
   wholesaleGenerarOrden: [(name) => name.startsWith('reportes-wholesale-generar-orden-')],
+  wholesaleGenerarPassingSheet: [(name) => name.startsWith('reportes-wholesale-generar-passing-sheet-')],
 };
 
 app.disable('x-powered-by');

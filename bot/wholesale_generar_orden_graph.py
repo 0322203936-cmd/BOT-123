@@ -42,8 +42,10 @@ DEFAULT_WORKBOOK_URL = (
     "file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&"
     "action=edit&mobileredirect=true"
 )
-TARGET_SHEET = "PO Nuevo"
-PRINT_AREA = "A1:I40"
+TARGET_SHEET = os.environ.get("WHOLESALE_PDF_TARGET_SHEET", "PO Nuevo")
+PRINT_AREA = os.environ.get("WHOLESALE_PDF_PRINT_AREA", "A1:I40")
+PDF_FILENAME = os.environ.get("WHOLESALE_PDF_FILENAME", "generar-orden.pdf")
+BUTTON_NAME = os.environ.get("WHOLESALE_PDF_BUTTON_NAME", "Ejecutar Generar Orden")
 ARTIFACT_DIR = Path(
     os.environ.get(
         "WHOLESALE_ORDER_ARTIFACT_DIR", "artifacts/wholesale_generar_orden"
@@ -131,8 +133,30 @@ def _replace_sheet_visibility(workbook_xml: str) -> tuple[str, int, int]:
     return updated, target_index, len(sheet_names)
 
 
+def _absolute_print_cell(cell: str) -> str:
+    match = re.fullmatch(r"\$?([A-Za-z]+)\$?(\d+)", cell.strip())
+    if not match:
+        raise RuntimeError(
+            f"Área de impresión inválida: {PRINT_AREA!r}. Usa, por ejemplo, A1:I40."
+        )
+    return f"${match.group(1).upper()}${match.group(2)}"
+
+
+def _print_area_reference() -> str:
+    parts = PRINT_AREA.split(":", 1)
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"Área de impresión inválida: {PRINT_AREA!r}. Usa, por ejemplo, A1:I40."
+        )
+    escaped_sheet = TARGET_SHEET.replace("'", "''")
+    return (
+        f"'{escaped_sheet}'!{_absolute_print_cell(parts[0])}:"
+        f"{_absolute_print_cell(parts[1])}"
+    )
+
+
 def _replace_print_area(workbook_xml: str, target_index: int) -> str:
-    print_area = "'PO Nuevo'!$A$1:$I$40"
+    print_area = _print_area_reference()
     updated_names: set[str] = set()
     pattern = re.compile(r"(<definedName\b(?P<attrs>[^>]*)>).*?(</definedName>)")
 
@@ -269,7 +293,7 @@ def main() -> None:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     started = time.time()
     summary: dict[str, object] = {
-        "button": "Ejecutar Generar Orden",
+        "button": BUTTON_NAME,
         "engine": "Microsoft Graph",
         "workbook": os.environ.get("SHAREPOINT_WORKBOOK_URL", DEFAULT_WORKBOOK_URL),
         "status": "error",
@@ -289,7 +313,7 @@ def main() -> None:
 
             temporary_item = upload_temporary_workbook(token, item, prepared)
             summary["temporary_sharepoint_item"] = temporary_item.get("name")
-            pdf_path = ARTIFACT_DIR / "generar-orden.pdf"
+            pdf_path = ARTIFACT_DIR / PDF_FILENAME
             convert_to_pdf(token, temporary_item, pdf_path)
             summary.update(
                 {

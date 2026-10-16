@@ -1,0 +1,52 @@
+name: Atajos Wholesale - Ejecutar Generar Passing Sheet
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: wholesale-generar-passing-sheet
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generar-passing-sheet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+
+      - name: Ejecutar Generar Passing Sheet con Microsoft Graph
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          SHAREPOINT_WORKBOOK_URL: https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B7FEB8241-AC2E-4964-B671-C4FAFF942F33%7D&file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&action=edit&mobileredirect=true
+          WHOLESALE_PDF_TARGET_SHEET: PASSING SHEET
+          WHOLESALE_PDF_PRINT_AREA: A1:B18
+          WHOLESALE_PDF_FILENAME: passing-sheet.pdf
+          WHOLESALE_PDF_BUTTON_NAME: Ejecutar Generar Passing Sheet
+          WHOLESALE_ORDER_ARTIFACT_DIR: artifacts/wholesale_generar_passing_sheet
+        run: python -u bot/wholesale_generar_orden_graph.py
+
+      - name: Guardar PDF y evidencias
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-wholesale-generar-passing-sheet-${{ github.run_number }}
+          path: artifacts/wholesale_generar_passing_sheet/*
+          if-no-files-found: warn
+          retention-days: 7
