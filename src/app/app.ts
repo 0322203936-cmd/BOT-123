@@ -76,6 +76,14 @@ const MAX_EMAIL_LOGO_BYTES = 10 * 1024 * 1024;
 const EMAIL_LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/bmp']);
 const MAX_EMAIL_PDF_BYTES = 10 * 1024 * 1024;
 
+function initialSectionFromLocation(): 'centro' | 'wholesale' {
+  if (typeof window === 'undefined') {
+    return 'centro';
+  }
+
+  return window.location.hash.toLowerCase() === '#wholesale' ? 'wholesale' : 'centro';
+}
+
 @Component({
   selector: 'app-root',
   imports: [CommonModule, FormsModule, EditorComponent],
@@ -83,7 +91,7 @@ const MAX_EMAIL_PDF_BYTES = 10 * 1024 * 1024;
   styleUrl: './app.css',
 })
 export class App implements OnInit, OnDestroy {
-  protected readonly activeSection = signal<'centro' | 'wholesale'>('centro');
+  protected readonly activeSection = signal<'centro' | 'wholesale'>(initialSectionFromLocation());
   protected readonly workflows = signal<WorkflowStatus[]>([]);
   protected readonly visibleWorkflows = computed(() =>
     this.workflows().filter(
