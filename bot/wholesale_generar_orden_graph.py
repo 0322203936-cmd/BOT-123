@@ -292,29 +292,50 @@ def prepare_pdf_xlsx_copy(source: Path, destination: Path) -> None:
 
 
 def prepare_clean_xlsx_copy(source: Path, destination: Path) -> None:
-    """Create a minimal, macro-free workbook containing only PO Nuevo."""
+    """Create a macro-free PDF copy with PO Nuevo as the sole visible sheet.
+
+    The support sheets stay inside this temporary workbook, but hidden.  That
+    gives the PDF converter access to the product, transport and price lookup
+    tables while keeping the output limited to PO Nuevo.  Cached formula
+    values are also retained as static values whenever Excel provided them.
+    """
     workbook = load_workbook(
         source,
         data_only=False,
         keep_vba=False,
         keep_links=False,
     )
+    values_workbook = load_workbook(
+        source,
+        data_only=True,
+        keep_vba=False,
+        keep_links=False,
+    )
     try:
-        if TARGET_SHEET not in workbook.sheetnames:
+        if TARGET_SHEET not in workbook.sheetnames or TARGET_SHEET not in values_workbook.sheetnames:
             raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
-        for sheet in list(workbook.worksheets):
-            if sheet.title != TARGET_SHEET:
-                workbook.remove(sheet)
+        values_sheet = values_workbook[TARGET_SHEET]
+        for candidate in workbook.worksheets:
+            if candidate.title != TARGET_SHEET:
+                candidate.sheet_state = "hidden"
         sheet = workbook[TARGET_SHEET]
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.data_type != "f":
+                    continue
+                cached_value = values_sheet[cell.coordinate].value
+                if cached_value is not None:
+                    cell.value = cached_value
         sheet.print_area = PRINT_AREA
         sheet.page_setup.orientation = "portrait"
         sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
-        workbook.active = 0
+        workbook.active = workbook.index(sheet)
         workbook.calculation.fullCalcOnLoad = True
         workbook.calculation.forceFullCalc = True
         workbook.save(destination)
     finally:
         workbook.close()
+        values_workbook.close()
 
 
 def upload_temporary_workbook(
