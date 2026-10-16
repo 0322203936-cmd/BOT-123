@@ -492,7 +492,14 @@ def main() -> None:
                         )
                         clean_xlsx = Path(temp_dir) / "prepared-clean.xlsx"
                         try:
-                            prepare_clean_xlsx_copy(prepared_xlsx, clean_xlsx)
+                            # Do not rebuild from ``prepared_xlsx`` here.  That
+                            # package has been edited at ZIP level in the two
+                            # earlier conversion attempts and recent Excel
+                            # Online saves can make its workbook.xml extension
+                            # unacceptable to strict XML readers.  The
+                            # original download is untouched and is the most
+                            # reliable source for a minimal PO Nuevo workbook.
+                            prepare_clean_xlsx_copy(source, clean_xlsx)
                         except Exception as clean_prepare_error:
                             raise RuntimeError(
                                 "No se pudo preparar el respaldo local del libro. "
