@@ -184,7 +184,7 @@ export class App implements OnInit, OnDestroy {
 
     this.refreshTimer = setInterval(() => {
       if (this.authenticated()) void this.refresh(false);
-    }, 15_000);
+    }, 60_000);
     this.clockTimer = setInterval(() => this.clock.set(Date.now()), 1_000);
   }
 

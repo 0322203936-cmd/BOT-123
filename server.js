@@ -143,7 +143,9 @@ const workflows = {
 };
 
 const lastDispatch = new Map();
-const WORKFLOW_CACHE_TTL_MS = 30_000;
+// GitHub status requests are shared by every visitor.  Keep a single fresh
+// snapshot for 90 seconds rather than re-querying each workflow every 30.
+const WORKFLOW_CACHE_TTL_MS = 90_000;
 let workflowCache = null;
 let workflowCacheAt = 0;
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
