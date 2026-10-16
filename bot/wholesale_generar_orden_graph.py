@@ -133,13 +133,23 @@ def _replace_sheet_visibility(workbook_xml: str) -> tuple[str, int, int]:
 
 def _replace_print_area(workbook_xml: str, target_index: int) -> str:
     print_area = "'PO Nuevo'!$A$1:$I$40"
-    for name in ("_xlnm.Print_Area", "Print_Area"):
-        pattern = re.compile(
-            rf'(<definedName\b[^>]*\bname="{re.escape(name)}"[^>]*\blocalSheetId="{target_index}"[^>]*>).*?(</definedName>)'
-        )
-        workbook_xml, count = pattern.subn(rf"\g<1>{print_area}\g<2>", workbook_xml, count=1)
-        if count == 0:
-            raise RuntimeError(f"No se encontró el área de impresión {name!r} de PO Nuevo.")
+    updated_names: set[str] = set()
+    pattern = re.compile(r"(<definedName\b(?P<attrs>[^>]*)>).*?(</definedName>)")
+
+    def replace_area(match: re.Match[str]) -> str:
+        attrs = match.group("attrs")
+        name_match = re.search(r'\bname="([^"]+)"', attrs)
+        sheet_match = re.search(r'\blocalSheetId="([^"]+)"', attrs)
+        name = name_match.group(1) if name_match else ""
+        local_sheet_id = sheet_match.group(1) if sheet_match else ""
+        if name in {"_xlnm.Print_Area", "Print_Area"} and local_sheet_id == str(target_index):
+            updated_names.add(name)
+            return f"{match.group(1)}{print_area}{match.group(3)}"
+        return match.group(0)
+
+    workbook_xml = pattern.sub(replace_area, workbook_xml)
+    if "_xlnm.Print_Area" not in updated_names:
+        raise RuntimeError("No se encontró el área de impresión _xlnm.Print_Area de PO Nuevo.")
     return workbook_xml
 
 
