@@ -126,10 +126,10 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_last_five_months(page: Page) -> tuple[date, date]:
-    """Filter POSCO orders from five calendar months ago through today."""
+def set_load_date_last_four_months(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from four calendar months ago through today."""
     today = datetime.now(BOT_TIMEZONE).date()
-    start_date = add_calendar_months(today, -5)
+    start_date = add_calendar_months(today, -4)
     menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
     menor_input_type = (menor.get_attribute("type") or "text").lower()
@@ -149,7 +149,7 @@ def set_load_date_last_five_months(page: Page) -> tuple[date, date]:
     mayor.press("Tab")
     print(
         f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={today.isoformat()} "
-        f"(últimos 5 meses calendario).",
+        f"(últimos 4 meses calendario).",
         flush=True,
     )
     return start_date, today
@@ -228,9 +228,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Filtrando Load Date de los últimos cinco meses hasta hoy...", flush=True)
-            start_date, end_date = set_load_date_last_five_months(page)
-            capture(page, "05_rango_hasta_cinco_meses.png")
+            print("Filtrando Load Date de los últimos cuatro meses hasta hoy...", flush=True)
+            start_date, end_date = set_load_date_last_four_months(page)
+            capture(page, "05_rango_ultimos_cuatro_meses.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
@@ -248,7 +248,7 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_5_MESES_OK load_date_menor={start_date.isoformat()} "
+                f"EXPORTAR_4_MESES_OK load_date_menor={start_date.isoformat()} "
                 f"load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
