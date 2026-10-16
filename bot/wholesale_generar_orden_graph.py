@@ -406,7 +406,35 @@ def convert_with_libreoffice(source: Path, destination: Path) -> None:
     """Convert the prepared local copy when Graph's Office service rejects it."""
     executable = shutil.which("libreoffice") or shutil.which("soffice")
     if not executable:
-        raise RuntimeError("No está disponible LibreOffice para el respaldo local de PDF.")
+        install = subprocess.run(
+            ["sudo", "apt-get", "update"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if install.returncode == 0:
+            install = subprocess.run(
+                [
+                    "sudo",
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "--no-install-recommends",
+                    "libreoffice-calc",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                check=False,
+            )
+        executable = shutil.which("libreoffice") or shutil.which("soffice")
+        if install.returncode != 0 or not executable:
+            detail = (install.stderr or install.stdout).strip()[-500:]
+            raise RuntimeError(
+                "No se pudo preparar LibreOffice para el respaldo local de PDF: "
+                f"{detail}"
+            )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     generated = destination.parent / f"{source.stem}.pdf"
@@ -463,88 +491,38 @@ def main() -> None:
         )
         with tempfile.TemporaryDirectory(prefix="wholesale-generar-orden-") as temp_dir:
             source = Path(temp_dir) / "source.xlsm"
-            prepared = Path(temp_dir) / "prepared.xlsm"
             download_workbook(token, item, source)
-            summary["preparation"] = prepare_pdf_copy(source, prepared)
-
-            temporary_item = upload_temporary_workbook(token, item, prepared)
-            temporary_items.append(temporary_item)
-            summary["temporary_sharepoint_item"] = temporary_item.get("name")
             pdf_path = ARTIFACT_DIR / PDF_FILENAME
+            clean_xlsx = Path(temp_dir) / "prepared-for-pdf.xlsx"
+            prepare_clean_xlsx_copy(source, clean_xlsx)
+            summary["preparation"] = {
+                "sheet": TARGET_SHEET,
+                "print_area": PRINT_AREA,
+                "orientation": "portrait",
+                "paper": "letter",
+                "package_mode": "macro-free copy; lookup sheets hidden",
+            }
+            clean_item = upload_temporary_workbook(
+                token, item, clean_xlsx, extension=".xlsx"
+            )
+            temporary_items.append(clean_item)
+            summary["temporary_sharepoint_item"] = clean_item.get("name")
             try:
-                convert_to_pdf(token, temporary_item, pdf_path)
+                # This clean workbook is the proven successful conversion path.
+                # Starting here avoids two 35-second 406 retries from the
+                # macro-enabled and ZIP-patched copies used previously.
+                convert_to_pdf(token, clean_item, pdf_path)
+                summary["pdf_fallback"] = "fast clean PO Nuevo XLSX"
             except RuntimeError as conversion_error:
                 if "respondió 406" not in str(conversion_error):
                     raise
                 print(
-                    "Graph no pudo abrir la copia XLSM; preparando una copia XLSX "
-                    "sin VBA para la conversión...",
+                    "Graph no pudo convertir la copia rápida; usando LibreOffice "
+                    "local como respaldo...",
                     flush=True,
                 )
-                prepared_xlsx = Path(temp_dir) / "prepared-for-pdf.xlsx"
-                prepare_pdf_xlsx_copy(prepared, prepared_xlsx)
-                xlsx_item = upload_temporary_workbook(
-                    token, item, prepared_xlsx, extension=".xlsx"
-                )
-                temporary_items.append(xlsx_item)
-                summary["temporary_sharepoint_fallback_item"] = xlsx_item.get("name")
-                try:
-                    convert_to_pdf(token, xlsx_item, pdf_path)
-                    summary["pdf_fallback"] = "macro-free XLSX temporary copy"
-                except RuntimeError as xlsx_conversion_error:
-                    if "respondió 406" not in str(xlsx_conversion_error):
-                        raise
-                    print(
-                        "Graph tampoco pudo convertir la copia XLSX; usando "
-                        "LibreOffice local como respaldo...",
-                        flush=True,
-                    )
-                    try:
-                        # LibreOffice is more tolerant of Excel extension XML
-                        # than openpyxl and can render the already prepared
-                        # macro-free copy without rewriting the source book.
-                        convert_with_libreoffice(prepared_xlsx, pdf_path)
-                        summary["pdf_fallback"] = "LibreOffice from macro-free XLSX"
-                    except RuntimeError as local_conversion_error:
-                        print(
-                            "LibreOffice no pudo convertir la copia XLSX; "
-                            "intentando un libro limpio con solo la hoja objetivo...",
-                            flush=True,
-                        )
-                        clean_xlsx = Path(temp_dir) / "prepared-clean.xlsx"
-                        try:
-                            # Do not rebuild from ``prepared_xlsx`` here.  That
-                            # package has been edited at ZIP level in the two
-                            # earlier conversion attempts and recent Excel
-                            # Online saves can make its workbook.xml extension
-                            # unacceptable to strict XML readers.  The
-                            # original download is untouched and is the most
-                            # reliable source for a minimal PO Nuevo workbook.
-                            prepare_clean_xlsx_copy(source, clean_xlsx)
-                        except Exception as clean_prepare_error:
-                            raise RuntimeError(
-                                "No se pudo preparar el respaldo local del libro. "
-                                f"LibreOffice: {local_conversion_error}; "
-                                f"limpieza XML: {clean_prepare_error}"
-                            ) from clean_prepare_error
-                        clean_item = upload_temporary_workbook(
-                            token, item, clean_xlsx, extension=".xlsx"
-                        )
-                        temporary_items.append(clean_item)
-                        summary["temporary_sharepoint_clean_item"] = clean_item.get("name")
-                        try:
-                            convert_to_pdf(token, clean_item, pdf_path)
-                            summary["pdf_fallback"] = "clean PO Nuevo XLSX temporary copy"
-                        except RuntimeError as clean_conversion_error:
-                            if "respondió 406" not in str(clean_conversion_error):
-                                raise
-                            print(
-                                "Graph tampoco pudo convertir el libro limpio; "
-                                "usando LibreOffice local para crear el PDF...",
-                                flush=True,
-                            )
-                            convert_with_libreoffice(clean_xlsx, pdf_path)
-                            summary["pdf_fallback"] = "LibreOffice from clean PO Nuevo XLSX"
+                convert_with_libreoffice(clean_xlsx, pdf_path)
+                summary["pdf_fallback"] = "LibreOffice from fast clean PO Nuevo XLSX"
             summary.update(
                 {
                     "status": "completed",

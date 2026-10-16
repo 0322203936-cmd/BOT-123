@@ -29,13 +29,6 @@ jobs:
         run: |
           pip install -r bot/requirements.txt
 
-      - name: Preparar respaldo local de PDF
-        run: |
-          if ! command -v libreoffice >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends libreoffice-calc
-          fi
-
       - name: Ejecutar Generar Orden con Microsoft Graph
         env:
           SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
