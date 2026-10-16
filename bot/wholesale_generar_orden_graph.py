@@ -29,6 +29,7 @@ from uuid import uuid4
 from zipfile import ZipFile
 
 import requests
+from openpyxl import load_workbook
 
 from sharepoint_sync import (
     GRAPH_URL,
@@ -290,6 +291,32 @@ def prepare_pdf_xlsx_copy(source: Path, destination: Path) -> None:
             destination_zip.writestr(info, content)
 
 
+def prepare_clean_xlsx_copy(source: Path, destination: Path) -> None:
+    """Create a minimal, macro-free workbook containing only PO Nuevo."""
+    workbook = load_workbook(
+        source,
+        data_only=False,
+        keep_vba=False,
+        keep_links=False,
+    )
+    try:
+        if TARGET_SHEET not in workbook.sheetnames:
+            raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
+        for sheet in list(workbook.worksheets):
+            if sheet.title != TARGET_SHEET:
+                workbook.remove(sheet)
+        sheet = workbook[TARGET_SHEET]
+        sheet.print_area = PRINT_AREA
+        sheet.page_setup.orientation = "portrait"
+        sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
+        workbook.active = 0
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+        workbook.save(destination)
+    finally:
+        workbook.close()
+
+
 def upload_temporary_workbook(
     token: str, item: dict, workbook_path: Path, *, extension: str = ".xlsm"
 ) -> dict:
@@ -447,12 +474,30 @@ def main() -> None:
                     if "respondió 406" not in str(xlsx_conversion_error):
                         raise
                     print(
-                        "Graph tampoco pudo convertir la copia XLSX; usando LibreOffice "
-                        "local para crear el PDF...",
+                        "Graph tampoco pudo convertir la copia XLSX; creando un libro "
+                        "limpio con solo PO Nuevo...",
                         flush=True,
                     )
-                    convert_with_libreoffice(prepared_xlsx, pdf_path)
-                    summary["pdf_fallback"] = "LibreOffice from macro-free XLSX temporary copy"
+                    clean_xlsx = Path(temp_dir) / "prepared-clean.xlsx"
+                    prepare_clean_xlsx_copy(prepared_xlsx, clean_xlsx)
+                    clean_item = upload_temporary_workbook(
+                        token, item, clean_xlsx, extension=".xlsx"
+                    )
+                    temporary_items.append(clean_item)
+                    summary["temporary_sharepoint_clean_item"] = clean_item.get("name")
+                    try:
+                        convert_to_pdf(token, clean_item, pdf_path)
+                        summary["pdf_fallback"] = "clean PO Nuevo XLSX temporary copy"
+                    except RuntimeError as clean_conversion_error:
+                        if "respondió 406" not in str(clean_conversion_error):
+                            raise
+                        print(
+                            "Graph tampoco pudo convertir el libro limpio; usando "
+                            "LibreOffice local para crear el PDF...",
+                            flush=True,
+                        )
+                        convert_with_libreoffice(clean_xlsx, pdf_path)
+                        summary["pdf_fallback"] = "LibreOffice from clean PO Nuevo XLSX"
             summary.update(
                 {
                     "status": "completed",
