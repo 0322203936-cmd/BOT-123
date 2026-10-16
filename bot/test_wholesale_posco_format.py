@@ -44,8 +44,8 @@ class WholesalePoscoFormatTests(unittest.TestCase):
         order["F22"] = "F4P"
         order["B23"] = "Manual White Product"
         order["C23"] = "WHITE"
-        order["D23"] = 6
-        order["E23"] = 12
+        order["D23"] = "6ST"
+        order["E23"] = "12BU"
         order["F23"] = "F4P"
         order["J23"] = "PENDIENTE DE BOOM"
         products = workbook.create_sheet("Productos")

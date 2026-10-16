@@ -58,6 +58,21 @@ def as_date(value: object, label: str) -> datetime:
     raise TransformationError(f"{label} está vacío o no es una fecha válida en PO Nuevo.")
 
 
+def required_wholesale_quantity(value: object, label: str) -> int:
+    """Accept the numeric labels shown by PO Nuevo, such as ``6ST`` or ``10BU``."""
+    try:
+        return required_positive_int(value, label)
+    except TransformationError as original_error:
+        text = clean(value)
+        match = re.fullmatch(
+            r"(\d+)\s*(?:st(?:em(?:s)?)?|bu(?:nch(?:es)?)?|pk|box)?", text,
+            re.IGNORECASE,
+        )
+        if not match:
+            raise original_error
+        return required_positive_int(match.group(1), label)
+
+
 def build_boom_recommendation(
     flower: object,
     color: object,
@@ -169,8 +184,8 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
             stems_input = order_sheet.cell(row_number, 4).value
             bunches_input = order_sheet.cell(row_number, 5).value
             box_input = clean(order_sheet.cell(row_number, 6).value)
-            stems = required_positive_int(stems_input, f"STEM/BCH de la fila {row_number}")
-            bunches = required_positive_int(bunches_input, f"BU/BOX de la fila {row_number}")
+            stems = required_wholesale_quantity(stems_input, f"STEM/BCH de la fila {row_number}")
+            bunches = required_wholesale_quantity(bunches_input, f"BU/BOX de la fila {row_number}")
             product = _select_product(products, description_input, color_input, box_input)
             pending_boom = is_boom_pending(order_sheet.cell(row_number, 10).value)
 
