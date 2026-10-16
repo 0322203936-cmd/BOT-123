@@ -28,16 +28,15 @@ jobs:
       - name: Instalar dependencias
         run: |
           pip install -r bot/requirements.txt
-          playwright install --with-deps chromium
 
-      - name: Ejecutar Generar Orden en Excel Online
+      - name: Ejecutar Generar Orden con Microsoft Graph
         env:
-          SHAREPOINT_USER: ${{ secrets.SHAREPOINT_USER }}
-          SHAREPOINT_PASSWORD: ${{ secrets.SHAREPOINT_PASSWORD }}
-          SHAREPOINT_STORAGE_STATE_B64: ${{ secrets.SHAREPOINT_STORAGE_STATE_B64 }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
           SHAREPOINT_WORKBOOK_URL: https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B7FEB8241-AC2E-4964-B671-C4FAFF942F33%7D&file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&action=edit&mobileredirect=true
           WHOLESALE_ORDER_ARTIFACT_DIR: artifacts/wholesale_generar_orden
-        run: python -u bot/wholesale_generar_orden.py
+        run: python -u bot/wholesale_generar_orden_graph.py
 
       - name: Guardar PDF y evidencias
         if: always()

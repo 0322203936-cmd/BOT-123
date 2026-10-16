@@ -56,14 +56,15 @@ El bot mantiene la bitácora `bot/data/facturas_enviadas.json`. La clave de cada
 
 ## Bot Wholesale — Ejecutar Generar Orden
 
-El botón **Ejecutar Generar Orden** aparece únicamente en **Atajos Wholesale**. Ejecuta el mismo botón existente dentro del libro `PEDIDO Suzy - Mex y Can USA 08-18-2026.xlsm` en Excel Online, sin usar Power Automate ni modificar las hojas. El PDF generado y las capturas se conservan en el artifact `reportes-wholesale-generar-orden-*` durante 7 días y se pueden descargar desde Atajos.
+El botón **Ejecutar Generar Orden** aparece únicamente en **Atajos Wholesale**. Reproduce con Microsoft Graph el resultado del botón existente dentro del libro `PEDIDO Suzy - Mex y Can USA 08-18-2026.xlsm`, sin usar Power Automate ni depender de un inicio de sesión interactivo. Usa una copia temporal para dejar visible únicamente `PO Nuevo`, imprimir `A1:I40` en vertical sobre papel carta, convertirla a PDF y eliminar la copia al terminar. El XLSM original no se sobrescribe. El PDF y el resumen se conservan en el artifact `reportes-wholesale-generar-orden-*` durante 7 días y se pueden descargar desde Atajos.
 
-El workflow está en `.github/workflows/wholesale-generar-orden.yml` y requiere en `BOT-123` una cuenta de SharePoint/Excel Online dedicada para automatización:
+El workflow está en `.github/workflows/wholesale-generar-orden.yml` y requiere en `BOT-123` una aplicación de Microsoft Entra con acceso de aplicación para leer/subir/eliminar archivos en la biblioteca de SharePoint:
 
-- `SHAREPOINT_USER`
-- `SHAREPOINT_PASSWORD`
+- `SHAREPOINT_TENANT_ID`
+- `SHAREPOINT_CLIENT_ID`
+- `SHAREPOINT_CLIENT_SECRET`
 
-Opcionalmente puede configurarse `SHAREPOINT_STORAGE_STATE_B64` con un estado de sesión de Playwright. La cuenta debe poder iniciar sesión sin una aprobación MFA interactiva; el runner de GitHub no puede contestar códigos ni aprobar notificaciones manualmente.
+El permiso de Graph debe tener consentimiento administrativo. Si Graph responde `403`, hay que revisar el permiso de aplicación (`Sites.ReadWrite.All` o equivalente) y su consentimiento; el código no cae de nuevo a Playwright ni a una contraseña.
 
 ## Configuración local
 
