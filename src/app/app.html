@@ -16,17 +16,35 @@
       @if (error()) { <p class="alert error" role="alert">{{ error() }}</p> }
     </section>
   } @else {
+    <nav class="section-tabs" aria-label="Secciones de atajos">
+      <button
+        type="button"
+        class="section-tab"
+        [class.active]="activeSection() === 'centro'"
+        (click)="activeSection.set('centro')"
+      >Atajos Centro Floricultor</button>
+      <button
+        type="button"
+        class="section-tab"
+        [class.active]="activeSection() === 'wholesale'"
+        (click)="activeSection.set('wholesale')"
+      >Atajos Wholesale</button>
+    </nav>
+
     <section class="hero">
-      <h1>Atajos Centro Floricultor</h1>
+      <h1>{{ activeSection() === 'wholesale' ? 'Atajos Wholesale' : 'Atajos Centro Floricultor' }}</h1>
+      @if (activeSection() === 'wholesale') {
+        <p class="section-description">Aquí agregaremos los botones y automatizaciones de Wholesale.</p>
+      }
     </section>
 
-    @if (!configured()) {
+    @if (activeSection() === 'centro' && !configured()) {
       <div class="alert error" role="alert">Falta configurar <code>GITHUB_TOKEN</code> en el servidor.</div>
     }
-    @if (message()) { <div class="alert success-message" role="status">{{ message() }}</div> }
-    @if (error()) { <div class="alert error" role="alert">{{ error() }}</div> }
+    @if (activeSection() === 'centro' && message()) { <div class="alert success-message" role="status">{{ message() }}</div> }
+    @if (activeSection() === 'centro' && error()) { <div class="alert error" role="alert">{{ error() }}</div> }
 
-    <section class="workflow-grid" aria-label="Automatizaciones disponibles">
+    <section class="workflow-grid" aria-label="Automatizaciones disponibles" [hidden]="activeSection() === 'wholesale'">
       @for (workflow of visibleWorkflows(); track workflow.key; let index = $index) {
         <article class="workflow-card" [class.secondary]="index === 1" [class.tertiary]="workflow.key === 'pegarData'" [class.quaternary]="workflow.key === 'inventario' || workflow.key === 'ainventario'" [class.quinary]="workflow.key === 'reunion' || workflow.key === 'dataProy' || workflow.key === 'dataReq'" [class.senary]="workflow.key === 'cajas'">
           <div class="card-head">
@@ -123,6 +141,14 @@
         </article>
       }
     </section>
+
+    @if (activeSection() === 'wholesale') {
+      <section class="wholesale-placeholder" aria-label="Automatizaciones Wholesale">
+        <div class="wholesale-placeholder-icon" aria-hidden="true">＋</div>
+        <h2>Botones de Wholesale</h2>
+        <p>Esta sección está lista para agregar aquí los nuevos botones sin modificar los atajos actuales.</p>
+      </section>
+    }
 
     @if (emailPanelOpen()) {
       <div class="modal-backdrop" role="presentation" (click)="closeEmailPanel()">

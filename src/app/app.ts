@@ -82,6 +82,7 @@ const MAX_EMAIL_PDF_BYTES = 10 * 1024 * 1024;
   styleUrl: './app.css',
 })
 export class App implements OnInit, OnDestroy {
+  protected readonly activeSection = signal<'centro' | 'wholesale'>('centro');
   protected readonly workflows = signal<WorkflowStatus[]>([]);
   protected readonly visibleWorkflows = computed(() =>
     this.workflows().filter((workflow) => workflow.key !== 'cancelaciones'),
