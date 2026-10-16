@@ -292,20 +292,8 @@ def prepare_pdf_xlsx_copy(source: Path, destination: Path) -> None:
             destination_zip.writestr(info, content)
 
 
-def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
-    """Create a macro-free PDF copy with PO Nuevo as the sole visible sheet.
-
-    The support sheets stay inside this temporary workbook, but hidden.  That
-    gives the PDF converter access to the product, transport and price lookup
-    tables while keeping the output limited to PO Nuevo.  Cached formula
-    values are also retained as static values whenever Excel provided them.
-    """
-    workbook = load_workbook(
-        source,
-        data_only=False,
-        keep_vba=False,
-        keep_links=False,
-    )
+def _read_order_metadata(source: Path) -> dict[str, str]:
+    """Read e-mail fields without saving or modifying the source workbook."""
     values_workbook = load_workbook(
         source,
         data_only=True,
@@ -313,30 +301,10 @@ def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
         keep_links=False,
     )
     try:
-        if TARGET_SHEET not in workbook.sheetnames or TARGET_SHEET not in values_workbook.sheetnames:
+        sheet_name = "PO Nuevo" if "PO Nuevo" in values_workbook.sheetnames else TARGET_SHEET
+        if sheet_name not in values_workbook.sheetnames:
             raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
-        values_sheet = values_workbook[TARGET_SHEET]
-        for candidate in workbook.worksheets:
-            if candidate.title != TARGET_SHEET:
-                candidate.sheet_state = "hidden"
-        sheet = workbook[TARGET_SHEET]
-        for row in sheet.iter_rows():
-            for cell in row:
-                if cell.data_type != "f":
-                    continue
-                cached_value = values_sheet[cell.coordinate].value
-                if cached_value is not None:
-                    cell.value = cached_value
-        sheet.print_area = PRINT_AREA
-        sheet.page_setup.orientation = "portrait"
-        sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
-        workbook.active = workbook.index(sheet)
-        workbook.calculation.fullCalcOnLoad = True
-        workbook.calculation.forceFullCalc = True
-        workbook.save(destination)
-        order_values = values_workbook[
-            "PO Nuevo" if "PO Nuevo" in values_workbook.sheetnames else TARGET_SHEET
-        ]
+        order_values = values_workbook[sheet_name]
         customer = str(order_values["F11"].value or "Cliente").strip()
         load_date_value = order_values["B19"].value
         if not isinstance(load_date_value, (date, datetime)):
@@ -350,8 +318,26 @@ def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
         )
         return {"customer": customer or "Cliente", "load_date": load_date or "Sin fecha"}
     finally:
-        workbook.close()
         values_workbook.close()
+
+
+def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
+    """Create a macro-free PDF copy without rebuilding workbook visuals.
+
+    ``openpyxl.save`` rewrites the drawing package and can remove Excel
+    objects that it does not understand.  In this workbook that meant the
+    Pacifica logo disappeared.  Patch the original package at ZIP level, then
+    only strip VBA from the temporary copy: drawings, images, print layout and
+    cached formulas remain byte-for-byte intact.
+    """
+    metadata = _read_order_metadata(source)
+    layout_copy = destination.with_suffix(".xlsm")
+    try:
+        prepare_pdf_copy(source, layout_copy)
+        prepare_pdf_xlsx_copy(layout_copy, destination)
+    finally:
+        layout_copy.unlink(missing_ok=True)
+    return metadata
 
 
 def upload_temporary_workbook(
