@@ -54,6 +54,17 @@ Para programarlo sin depender del evento `schedule` de GitHub, el servidor expon
 
 El bot mantiene la bitácora `bot/data/facturas_enviadas.json`. La clave de cada registro combina el número y la fecha de la orden. Las órdenes omitidas por aparecer en esa bitácora no se procesan otra vez. El workflow guarda cambios de esa bitácora después de un envío exitoso cuando `KOMET_EMAIL_MODE` está en `send` y `KOMET_ALLOW_SEND` vale `YES`.
 
+## Bot Wholesale — Ejecutar Generar Orden
+
+El botón **Ejecutar Generar Orden** aparece únicamente en **Atajos Wholesale**. Ejecuta el mismo botón existente dentro del libro `PEDIDO Suzy - Mex y Can USA 08-18-2026.xlsm` en Excel Online, sin usar Power Automate ni modificar las hojas. El PDF generado y las capturas se conservan en el artifact `reportes-wholesale-generar-orden-*` durante 7 días y se pueden descargar desde Atajos.
+
+El workflow está en `.github/workflows/wholesale-generar-orden.yml` y requiere en `BOT-123` una cuenta de SharePoint/Excel Online dedicada para automatización:
+
+- `SHAREPOINT_USER`
+- `SHAREPOINT_PASSWORD`
+
+Opcionalmente puede configurarse `SHAREPOINT_STORAGE_STATE_B64` con un estado de sesión de Playwright. La cuenta debe poder iniciar sesión sin una aprobación MFA interactiva; el runner de GitHub no puede contestar códigos ni aprobar notificaciones manualmente.
+
 ## Configuración local
 
 Requisitos: Node.js 22.12 o posterior y npm.

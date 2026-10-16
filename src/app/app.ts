@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { EditorComponent } from '@tinymce/tinymce-angular';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas' | 'facturasKomet';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas' | 'facturasKomet' | 'wholesaleGenerarOrden';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
@@ -85,7 +85,12 @@ export class App implements OnInit, OnDestroy {
   protected readonly activeSection = signal<'centro' | 'wholesale'>('centro');
   protected readonly workflows = signal<WorkflowStatus[]>([]);
   protected readonly visibleWorkflows = computed(() =>
-    this.workflows().filter((workflow) => workflow.key !== 'cancelaciones'),
+    this.workflows().filter(
+      (workflow) => workflow.key !== 'cancelaciones' && workflow.key !== 'wholesaleGenerarOrden',
+    ),
+  );
+  protected readonly wholesaleWorkflow = computed(
+    () => this.workflows().find((workflow) => workflow.key === 'wholesaleGenerarOrden') ?? null,
   );
   protected readonly loading = signal(true);
   protected readonly running = signal<WorkflowKey | null>(null);
@@ -481,7 +486,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
-    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq', 'cajas', 'facturasKomet'] as WorkflowKey[]).includes(workflow.key)) {
+    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq', 'cajas', 'facturasKomet', 'wholesaleGenerarOrden'] as WorkflowKey[]).includes(workflow.key)) {
       return true;
     }
 

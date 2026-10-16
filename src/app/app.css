@@ -12,6 +12,8 @@
 .section-tabs { display: flex; gap: 8px; margin: 8px 0 4px; }
 .section-tab.active { color: #176b4d; }
 .workflow-grid[hidden] { display: none; }
+.wholesale-grid { margin-top: 28px; }
+.wholesale-card { max-width: 430px; }
 
 .hero {
   margin: 38px 0 28px;

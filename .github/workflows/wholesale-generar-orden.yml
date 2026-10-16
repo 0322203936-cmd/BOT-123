@@ -1,0 +1,49 @@
+name: Atajos Wholesale - Ejecutar Generar Orden
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: wholesale-generar-orden
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generar-orden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Ejecutar Generar Orden en Excel Online
+        env:
+          SHAREPOINT_USER: ${{ secrets.SHAREPOINT_USER }}
+          SHAREPOINT_PASSWORD: ${{ secrets.SHAREPOINT_PASSWORD }}
+          SHAREPOINT_STORAGE_STATE_B64: ${{ secrets.SHAREPOINT_STORAGE_STATE_B64 }}
+          SHAREPOINT_WORKBOOK_URL: https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B7FEB8241-AC2E-4964-B671-C4FAFF942F33%7D&file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&action=edit&mobileredirect=true
+          WHOLESALE_ORDER_ARTIFACT_DIR: artifacts/wholesale_generar_orden
+        run: python -u bot/wholesale_generar_orden.py
+
+      - name: Guardar PDF y evidencias
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-wholesale-generar-orden-${{ github.run_number }}
+          path: artifacts/wholesale_generar_orden/*
+          if-no-files-found: warn
+          retention-days: 7

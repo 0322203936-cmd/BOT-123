@@ -114,6 +114,15 @@ const workflows = {
     description: 'Prepara Factura, Pick Ticket y Etiquetas para cada orden reciente y guarda capturas sin enviar correos.',
     schedule: 'Ejecución manual · modo prueba',
   },
+  wholesaleGenerarOrden: {
+    owner,
+    repo: process.env.WHOLESALE_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'wholesale-generar-orden.yml',
+    name: 'Ejecutar Generar Orden',
+    description: 'Abre el libro Wholesale de SharePoint y ejecuta el mismo botón Generar Orden del Excel.',
+    schedule: 'Ejecución manual',
+  },
 };
 
 const lastDispatch = new Map();
@@ -177,6 +186,9 @@ const reportMatchers = {
   facturasKomet: [
     (name) => /(^|\/)summary\.json$/i.test(name),
   ],
+  wholesaleGenerarOrden: [
+    (name) => /(^|\/)generar-orden\.pdf$/i.test(name),
+  ],
 };
 
 const artifactNameMatchers = {
@@ -202,6 +214,7 @@ const artifactNameMatchers = {
   ],
   cajas: [(name) => name.startsWith('reportes-inventory-boxes-')],
   facturasKomet: [(name) => name.startsWith('reportes-facturas-komet-')],
+  wholesaleGenerarOrden: [(name) => name.startsWith('reportes-wholesale-generar-orden-')],
 };
 
 app.disable('x-powered-by');
@@ -728,6 +741,7 @@ function reportContentType(filename) {
     '.xls': 'application/vnd.ms-excel',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+    '.pdf': 'application/pdf',
   }[extension] || 'application/octet-stream';
 }
 
