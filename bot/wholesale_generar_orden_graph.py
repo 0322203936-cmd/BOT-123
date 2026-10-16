@@ -407,6 +407,10 @@ def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
             if candidate.title != TARGET_SHEET:
                 candidate.sheet_state = "hidden"
         sheet = workbook[TARGET_SHEET]
+        # Graph can render a clipped remnant of this embedded worksheet image.
+        # The final PDF receives the same logo directly, so remove Excel's copy
+        # from the temporary converter workbook to guarantee a single logo.
+        sheet._images.clear()
         for row in sheet.iter_rows():
             for cell in row:
                 if cell.data_type == "f":
