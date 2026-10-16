@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -352,6 +354,39 @@ def convert_to_pdf(token: str, item: dict, destination: Path) -> None:
         raise last_error
 
 
+def convert_with_libreoffice(source: Path, destination: Path) -> None:
+    """Convert the prepared local copy when Graph's Office service rejects it."""
+    executable = shutil.which("libreoffice") or shutil.which("soffice")
+    if not executable:
+        raise RuntimeError("No está disponible LibreOffice para el respaldo local de PDF.")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    generated = destination.parent / f"{source.stem}.pdf"
+    if generated.exists():
+        generated.unlink()
+    result = subprocess.run(
+        [
+            executable,
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(destination.parent),
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+    if result.returncode != 0 or not generated.exists():
+        detail = (result.stderr or result.stdout).strip()[-500:]
+        raise RuntimeError(f"LibreOffice no pudo generar el PDF: {detail}")
+    generated.replace(destination)
+    if not destination.read_bytes().startswith(b"%PDF"):
+        raise RuntimeError("LibreOffice no devolvió un PDF válido.")
+
+
 def delete_temporary_workbook(token: str, item: dict) -> None:
     drive_id = item["parentReference"]["driveId"]
     request_graph(
@@ -405,8 +440,19 @@ def main() -> None:
                 )
                 temporary_items.append(xlsx_item)
                 summary["temporary_sharepoint_fallback_item"] = xlsx_item.get("name")
-                convert_to_pdf(token, xlsx_item, pdf_path)
-                summary["pdf_fallback"] = "macro-free XLSX temporary copy"
+                try:
+                    convert_to_pdf(token, xlsx_item, pdf_path)
+                    summary["pdf_fallback"] = "macro-free XLSX temporary copy"
+                except RuntimeError as xlsx_conversion_error:
+                    if "respondió 406" not in str(xlsx_conversion_error):
+                        raise
+                    print(
+                        "Graph tampoco pudo convertir la copia XLSX; usando LibreOffice "
+                        "local para crear el PDF...",
+                        flush=True,
+                    )
+                    convert_with_libreoffice(prepared_xlsx, pdf_path)
+                    summary["pdf_fallback"] = "LibreOffice from macro-free XLSX temporary copy"
             summary.update(
                 {
                     "status": "completed",
