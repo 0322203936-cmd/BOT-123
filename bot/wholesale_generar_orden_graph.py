@@ -474,30 +474,49 @@ def main() -> None:
                     if "respondió 406" not in str(xlsx_conversion_error):
                         raise
                     print(
-                        "Graph tampoco pudo convertir la copia XLSX; creando un libro "
-                        "limpio con solo PO Nuevo...",
+                        "Graph tampoco pudo convertir la copia XLSX; usando "
+                        "LibreOffice local como respaldo...",
                         flush=True,
                     )
-                    clean_xlsx = Path(temp_dir) / "prepared-clean.xlsx"
-                    prepare_clean_xlsx_copy(prepared_xlsx, clean_xlsx)
-                    clean_item = upload_temporary_workbook(
-                        token, item, clean_xlsx, extension=".xlsx"
-                    )
-                    temporary_items.append(clean_item)
-                    summary["temporary_sharepoint_clean_item"] = clean_item.get("name")
                     try:
-                        convert_to_pdf(token, clean_item, pdf_path)
-                        summary["pdf_fallback"] = "clean PO Nuevo XLSX temporary copy"
-                    except RuntimeError as clean_conversion_error:
-                        if "respondió 406" not in str(clean_conversion_error):
-                            raise
+                        # LibreOffice is more tolerant of Excel extension XML
+                        # than openpyxl and can render the already prepared
+                        # macro-free copy without rewriting the source book.
+                        convert_with_libreoffice(prepared_xlsx, pdf_path)
+                        summary["pdf_fallback"] = "LibreOffice from macro-free XLSX"
+                    except RuntimeError as local_conversion_error:
                         print(
-                            "Graph tampoco pudo convertir el libro limpio; usando "
-                            "LibreOffice local para crear el PDF...",
+                            "LibreOffice no pudo convertir la copia XLSX; "
+                            "intentando un libro limpio con solo la hoja objetivo...",
                             flush=True,
                         )
-                        convert_with_libreoffice(clean_xlsx, pdf_path)
-                        summary["pdf_fallback"] = "LibreOffice from clean PO Nuevo XLSX"
+                        clean_xlsx = Path(temp_dir) / "prepared-clean.xlsx"
+                        try:
+                            prepare_clean_xlsx_copy(prepared_xlsx, clean_xlsx)
+                        except Exception as clean_prepare_error:
+                            raise RuntimeError(
+                                "No se pudo preparar el respaldo local del libro. "
+                                f"LibreOffice: {local_conversion_error}; "
+                                f"limpieza XML: {clean_prepare_error}"
+                            ) from clean_prepare_error
+                        clean_item = upload_temporary_workbook(
+                            token, item, clean_xlsx, extension=".xlsx"
+                        )
+                        temporary_items.append(clean_item)
+                        summary["temporary_sharepoint_clean_item"] = clean_item.get("name")
+                        try:
+                            convert_to_pdf(token, clean_item, pdf_path)
+                            summary["pdf_fallback"] = "clean PO Nuevo XLSX temporary copy"
+                        except RuntimeError as clean_conversion_error:
+                            if "respondió 406" not in str(clean_conversion_error):
+                                raise
+                            print(
+                                "Graph tampoco pudo convertir el libro limpio; "
+                                "usando LibreOffice local para crear el PDF...",
+                                flush=True,
+                            )
+                            convert_with_libreoffice(clean_xlsx, pdf_path)
+                            summary["pdf_fallback"] = "LibreOffice from clean PO Nuevo XLSX"
             summary.update(
                 {
                     "status": "completed",
