@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
+from wholesale_products_sync import sync_wholesale_products
+
 
 POSCO_URL = "http://3.132.9.174/Posco/"
 ARTIFACTS_DIR = Path("artifacts/exportar_6_meses")
@@ -126,21 +128,34 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_mayor_five_months(page: Page) -> tuple[date, date]:
-    """Keep Load Date Menor as POSCO set it; extend only Mayor to today + 5 months."""
+def set_load_date_last_month_window(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from one calendar month ago through today."""
     today = datetime.now(BOT_TIMEZONE).date()
-    end_date = add_calendar_months(today, 5)
+    end_date = today
+    start_date = add_calendar_months(end_date, -1)
+    menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
-    input_type = (mayor.get_attribute("type") or "text").lower()
-    formatted = end_date.isoformat() if input_type == "date" else end_date.strftime("%m/%d/%Y")
-    mayor.fill(formatted)
+    menor_input_type = (menor.get_attribute("type") or "text").lower()
+    mayor_input_type = (mayor.get_attribute("type") or "text").lower()
+    start_formatted = (
+        start_date.isoformat()
+        if menor_input_type == "date"
+        else start_date.strftime("%m/%d/%Y")
+    )
+    end_formatted = (
+        end_date.isoformat()
+        if mayor_input_type == "date"
+        else end_date.strftime("%m/%d/%Y")
+    )
+    menor.fill(start_formatted)
+    mayor.fill(end_formatted)
     mayor.press("Tab")
     print(
-        f"Load Date Menor se conserva; Load Date Mayor={end_date.isoformat()} "
-        f"(hoy {today.isoformat()} + 5 meses calendario).",
+        f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={end_date.isoformat()} "
+        f"(desde un mes atrás hasta hoy).",
         flush=True,
     )
-    return today, end_date
+    return start_date, end_date
 
 
 def click_search(page: Page) -> None:
@@ -216,15 +231,16 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Conservando Load Date Menor y extendiendo Load Date Mayor a cinco meses...", flush=True)
-            today, end_date = set_load_date_mayor_five_months(page)
-            capture(page, "05_rango_hasta_cinco_meses.png")
+            print("Filtrando Load Date desde un mes atrás hasta hoy...", flush=True)
+            start_date, end_date = set_load_date_last_month_window(page)
+            capture(page, "05_rango_un_mes_atras_a_hoy.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
             except PlaywrightTimeoutError:
                 print("Aviso: POSCO sigue cargando resultados; se continuará con el filtro ACTIVO.", flush=True)
-            page.wait_for_timeout(120_000)
+            print("Esperando hasta 5 minutos para que POSCO termine de cargar el rango...", flush=True)
+            page.wait_for_timeout(300_000)
             capture(page, "06_busqueda_rango_completada.png")
 
             print("Cambiando estado a ACTIVO después de buscar el rango...", flush=True)
@@ -235,9 +251,11 @@ def run() -> None:
             print("Exportando Exportar Color filtro...", flush=True)
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
+            print("Sincronizando productos nuevos de WHOLESALE en SharePoint...", flush=True)
+            sync_wholesale_products(report)
             print(
-                f"EXPORTAR_5_MESES_OK inicio_posco_sin_cambios=true "
-                f"hoy={today.isoformat()} load_date_mayor={end_date.isoformat()} reporte={report}",
+                f"EXPORTAR_ULTIMO_MES_OK load_date_menor={start_date.isoformat()} "
+                f"load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
         except Exception:

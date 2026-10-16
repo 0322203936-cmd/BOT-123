@@ -41,19 +41,23 @@ jobs:
           KOMET_PICK_TICKET_EMAIL: ${{ secrets.KOMET_PICK_TICKET_EMAIL }}
           KOMET_LABELS_EMAIL: ${{ secrets.KOMET_LABELS_EMAIL }}
           KOMET_TIMEZONE: America/Tijuana
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
         run: python -u bot/facturas_komet.py
 
-      - name: Guardar bitácora de facturas enviadas
+      - name: Guardar bitácoras de documentos enviados
         if: ${{ success() && env.KOMET_EMAIL_MODE == 'send' }}
         run: |
-          if [ -z "$(git status --porcelain -- bot/data/facturas_enviadas.json)" ]; then
-            echo "No hay nuevas facturas enviadas para registrar."
+          if [ -z "$(git status --porcelain -- bot/data/facturas_enviadas.json bot/data/detalles_exportacion_enviados.json)" ]; then
+            echo "No hay nuevos documentos enviados para registrar."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bot/data/facturas_enviadas.json
-          git commit -m "Registrar facturas Komet enviadas [skip ci]"
+          git add bot/data/facturas_enviadas.json bot/data/detalles_exportacion_enviados.json
+          git commit -m "Registrar documentos Komet enviados [skip ci]"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Guardar imágenes de evidencia
@@ -73,3 +77,66 @@ jobs:
           path: artifacts/facturas_komet/summary.json
           if-no-files-found: warn
           retention-days: 7
+
+  posco-order-artifacts:
+    # The original documents go first; Order Details is mailed after the POSCO result.
+    needs: facturas-komet
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Descargar repositorio actualizado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r bot/requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Generar Excel POSCO y actualizar únicamente órdenes nuevas
+        env:
+          KOMET_USER: ${{ secrets.KOMET_USER }}
+          KOMET_PASSWORD: ${{ secrets.KOMET_PASSWORD }}
+          KOMET_TIMEZONE: America/Tijuana
+          KOMET_POSCO_MAPPING_B64: ${{ secrets.KOMET_POSCO_MAPPING_B64 }}
+          KOMET_POSCO_TEMPLATE_B64: ${{ secrets.KOMET_POSCO_TEMPLATE_B64 }}
+          KOMET_POSCO_STAGE_MODE: apply
+          KOMET_ORDER_DETAILS_EMAIL: "Irene.Machain@Pacifica-farms.com; jesus.sandoval@cfbc.co"
+          POSCO_USER: ${{ secrets.POSCO_USER }}
+          POSCO_PASSWORD: ${{ secrets.POSCO_PASSWORD }}
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
+        run: python -u bot/posco_order_artifacts.py
+
+      - name: Guardar archivos y reporte POSCO como artefacto
+        id: upload_posco
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pedidos-posco-prueba-${{ github.run_number }}
+          path: artifacts/facturas_komet/posco_orders/*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Guardar bitácoras POSCO y de detalles enviados
+        if: ${{ always() && steps.upload_posco.outcome == 'success' }}
+        run: |
+          if [ -z "$(git status --porcelain -- bot/data/posco_transformados.json bot/data/posco_cargas.json bot/data/detalles_exportacion_enviados.json)" ]; then
+            echo "No hay nuevas cargas ni detalles POSCO para registrar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bot/data/posco_transformados.json bot/data/posco_cargas.json bot/data/detalles_exportacion_enviados.json
+          git commit -m "Registrar pedidos POSCO y detalles enviados [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

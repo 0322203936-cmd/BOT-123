@@ -120,6 +120,177 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 assumed_today=self.assumed_today,
             )
 
+    def test_carries_only_remaining_boxes_to_first_safe_date_once(self) -> None:
+        run_date = date(2026, 10, 8)
+        rows = [
+            ["Pacific", "Matricaria", 15, 0, date(2026, 10, 10)],
+            ["Pacific", "Marigold", 5, 2, date(2026, 10, 8)],
+            ["Pacific", "Marigold", 5, 1, date(2026, 10, 9)],
+            ["Pacific", "Marigold", 5, 3, date(2026, 10, 10)],
+            ["Pacific", "Marigold", 5, 4, date(2026, 10, 12)],
+            ["Pacific", "Marigold", 15, 2, date(2026, 10, 10)],
+            ["Pacific", "Marigold", 15, 0, date(2026, 10, 12)],
+            ["Pacific", "Old stock", 10, 5, date(2026, 10, 7)],
+        ]
+
+        result = apply_inventory_rules(
+            rows, product_column=1, quantity_column=3, date_column=4,
+            assumed_today=run_date,
+        )
+        actual = [row.values for row in result.output_rows if not row.is_blank]
+        self.assertEqual(actual, [
+            ("Pacific", "Marigold", 5, 10.0, date(2026, 10, 12)),
+            ("Pacific", "Marigold", 15, 2.0, date(2026, 10, 12)),
+            ("Pacific", "Marigold", 15, 0, date(2026, 10, 13)),
+        ])
+        self.assertEqual(sum(row[3] for row in actual), 12)
+        self.assertEqual(result.removed_rows, 6)
+        self.assertEqual(result.carried_boxes, 8)
+
+        repeated = apply_inventory_rules(
+            actual, product_column=1, quantity_column=3, date_column=4,
+            assumed_today=run_date,
+        )
+        self.assertEqual([row.values for row in repeated.output_rows], actual)
+        self.assertEqual(repeated.carried_boxes, 0)
+
+        next_day = apply_inventory_rules(
+            actual, product_column=1, quantity_column=3, date_column=4,
+            assumed_today=date(2026, 10, 9),
+        )
+        self.assertEqual(
+            sorted((row.values[2], row.values[3], row.values[4]) for row in next_day.output_rows if row.values[3] > 0),
+            [(5, 10.0, date(2026, 10, 13)), (15, 2.0, date(2026, 10, 13))],
+        )
+        self.assertEqual(sum(row.values[3] for row in next_day.output_rows), 12)
+
+    def test_carry_extends_availability_table_for_customer_view(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "output.xlsx"
+            workbook = Workbook()
+            workbook.active.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append([
+                "Vendor Name", "Product Description", "Unit of Sale",
+                "Package Type", "Pack", "Units / Pack", "Qty Packages",
+                "Price", "Available From",
+            ])
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 2, 3.1, "2026-10-10"])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I2"))
+            workbook.save(source)
+            workbook.close()
+
+            transform_inventory_workbook(source, output, assumed_today=date(2026, 10, 8))
+            self.assertEqual(rebuild_customer_view_from_availability(output), 1)
+
+            result = load_workbook(output)
+            try:
+                sheet = result["Availability"]
+                self.assertEqual(sheet.tables["tblAvailability2"].ref, "A1:I3")
+                self.assertEqual(sheet["G2"].value, 2)
+                self.assertEqual(sheet["I2"].value.date(), date(2026, 10, 12))
+                self.assertTrue(sheet["I2"].is_date)
+                self.assertEqual(sheet["G3"].value, 0)
+                self.assertEqual(sheet["I3"].value.date(), date(2026, 10, 13))
+                self.assertEqual(result["Customer View"]["G8"].value.date(), date(2026, 10, 12))
+            finally:
+                result.close()
+
+    def test_exported_komet_stock_is_reduced_before_carrying_boxes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            source = folder / "source.xlsx"
+            komet = folder / "komet.xlsx"
+            refreshed = folder / "refreshed.xlsx"
+            output = folder / "output.xlsx"
+
+            workbook = Workbook()
+            workbook.active.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append([
+                "Vendor Name", "Product Description", "Unit of Sale",
+                "Package Type", "Pack", "Units / Pack", "Qty Packages",
+                "Price", "Available From",
+            ])
+            availability.append(["Pacific", "Matricaria", "Bunch", "L", 15, 10, 2, 5.5, date(2026, 10, 10)])
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 3, 3.1, date(2026, 10, 10)])
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 0, 3.1, date(2026, 10, 12)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I4"))
+
+            inventory = workbook.create_sheet("Inventory")
+            for _ in range(7):
+                inventory.append([])
+            inventory_headers = ["AWB", "Ref #", "Location", "Product", "Hold", "Customer", "Vendor", "Aging", "Qty"]
+            inventory.append(inventory_headers)
+            inventory.append(["AWB-2026-10-08", "old", "L", "Matricaria", "", "", "", 2, 2])
+            inventory.append(["AWB-2026-10-08", "old", "L", "Marigold Orange", "", "", "", 2, 3])
+            inventory.add_table(Table(displayName="tblInventory", ref="A8:I10"))
+            workbook.save(source)
+            workbook.close()
+
+            export = Workbook()
+            export.active.append(inventory_headers)
+            export.active.append(["AWB-2026-10-08", "new", "L", "Marigold Orange", "", "", "", 2, 2])
+            export.save(komet)
+            export.close()
+
+            refresh_workbook_with_komet_inventory(
+                source, komet, refreshed, assumed_today=date(2026, 10, 8),
+            )
+            transform_inventory_workbook(refreshed, output, assumed_today=date(2026, 10, 8))
+            self.assertEqual(rebuild_customer_view_from_availability(output), 1)
+            result = load_workbook(output)
+            try:
+                rows = [
+                    (result["Availability"].cell(row, 2).value,
+                     result["Availability"].cell(row, 7).value,
+                     result["Availability"].cell(row, 9).value.date())
+                    for row in range(2, 4)
+                ]
+                self.assertEqual(rows, [
+                    ("Marigold Orange", 2.0, date(2026, 10, 12)),
+                    ("Marigold Orange", 0, date(2026, 10, 13)),
+                ])
+            finally:
+                result.close()
+
+            preserved = folder / "preserved.xlsx"
+            preserved_output = folder / "preserved-output.xlsx"
+            refresh_workbook_with_komet_inventory(
+                source, None, preserved, assumed_today=date(2026, 10, 8),
+            )
+            transform_inventory_workbook(
+                preserved, preserved_output, assumed_today=date(2026, 10, 8),
+            )
+            result = load_workbook(preserved_output)
+            try:
+                nonzero = {
+                    result["Availability"].cell(row, 2).value:
+                    result["Availability"].cell(row, 7).value
+                    for row in range(2, result["Availability"].max_row + 1)
+                    if isinstance(result["Availability"].cell(row, 7).value, (int, float))
+                    and result["Availability"].cell(row, 7).value > 0
+                }
+                self.assertEqual(nonzero, {"Matricaria": 2.0, "Marigold Orange": 3.0})
+            finally:
+                result.close()
+
+            ambiguous = folder / "ambiguous.xlsx"
+            workbook = load_workbook(source)
+            workbook["Availability"].append([
+                "Pacific", "Marigold Orange", "Bunch", "L", 15, 5, 2, 2.7,
+                date(2026, 10, 10),
+            ])
+            workbook["Availability"].tables["tblAvailability2"].ref = "A1:I5"
+            workbook.save(ambiguous)
+            workbook.close()
+            with self.assertRaisesRegex(RuntimeError, "sin duplicarlas"):
+                refresh_workbook_with_komet_inventory(
+                    ambiguous, komet, folder / "ambiguous-output.xlsx",
+                    assumed_today=date(2026, 10, 8),
+                )
+
     def test_workbook_transform_copies_format_to_added_row(self) -> None:
         self.assertIsNotNone(transform_inventory_workbook)
         with TemporaryDirectory() as temp_dir:
@@ -165,6 +336,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability = workbook.create_sheet("Availability")
             availability.append(["Product Description", "Available From"])
             availability.append(["A", date(2026, 9, 14)])
+            availability.append(["Day of Dead Mixed Box", date(2026, 9, 15)])
+            availability.append(["California Greens Mixed Box", date(2026, 9, 16)])
             availability["A2"].font = Font(name="Arial", bold=True)
             availability["B2"].number_format = "mmm d, yyyy"
             workbook.save(source)
@@ -183,6 +356,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A2"]._style, availability["A2"]._style)
                 self.assertEqual(result.active["B2"].value.date(), date(2026, 9, 14))
                 self.assertEqual(result.active["B2"].number_format, DATE_NUMBER_FORMAT)
+                self.assertEqual(result.active["A3"].value, "Day of Dead Mixed Box")
+                self.assertEqual(result.active["A4"].value, "California Greens Mixed Box")
             finally:
                 result.close()
 
@@ -295,7 +470,8 @@ class InventoryBoxTransformTests(unittest.TestCase):
             availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, 9)])
             for day in range(12, 20):
                 availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 1, 3.10, date(2026, 10, day)])
-            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I13"))
+            availability.append(["Pacific", "Celosia Orange", "Bunch", "D", 10, 10, 0, 5.20, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I14"))
             workbook.create_sheet("Inventory")
             workbook.save(source)
             workbook.close()
@@ -311,12 +487,22 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(customer["A1"].fill.fgColor.rgb, "FF074C73")
                 self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
                 self.assertEqual(customer["G8"].fill.fgColor.rgb, "FFFFB84C")
+                self.assertEqual(customer["G6"].value, "Boxes available by Truck Load Date")
+                self.assertTrue(customer["G6"].alignment.wrap_text)
+                self.assertIn("G6:P6", {str(rng) for rng in customer.merged_cells.ranges})
+                self.assertGreaterEqual(customer.row_dimensions[6].height, 24)
                 self.assertEqual(customer["A10"].font.name, "Lora")
                 self.assertEqual(customer["H8"].value.date(), date(2026, 10, 10))
                 self.assertEqual(customer["I8"].value.date(), date(2026, 10, 12))
                 self.assertEqual(customer["P8"].value.date(), date(2026, 10, 19))
                 self.assertEqual(customer["G10"].value, 2)
                 self.assertEqual(customer["H10"].value, 3)
+                self.assertEqual(customer["G10"].font.color.rgb, "FF664935")
+                self.assertEqual(customer["G10"].fill.fill_type, customer["A10"].fill.fill_type)
+                self.assertEqual(customer["G10"].fill.fgColor.rgb, customer["A10"].fill.fgColor.rgb)
+                self.assertEqual(customer["G12"].font.color.rgb, "FF664935")
+                self.assertEqual(customer["G12"].fill.fill_type, customer["A12"].fill.fill_type)
+                self.assertEqual(customer["G12"].fill.fgColor.rgb, customer["A12"].fill.fgColor.rgb)
                 self.assertEqual(customer["I10"].value, "—")
                 self.assertEqual(customer["P10"].value, "—")
                 self.assertEqual(customer["A12"].value, "Marigold Orange")
@@ -329,6 +515,67 @@ class InventoryBoxTransformTests(unittest.TestCase):
                         for cell in row
                     )
                 )
+            finally:
+                result.close()
+
+    def test_rebuilds_customer_view_with_explicit_greens_and_mixed_boxes_categories(self) -> None:
+        self.assertIsNotNone(rebuild_customer_view_from_availability)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append(
+                [
+                    "Vendor Name",
+                    "Product Description",
+                    "Unit of Sale",
+                    "Package Type",
+                    "Pack",
+                    "Units / Pack",
+                    "Qty Packages",
+                    "Price",
+                    "Available From",
+                ]
+            )
+            # Deliberately interleave the categories in Availability.
+            availability.append(["Pacific", "Day of Dead Sampler", "Bunch", "L", 10, 80, 1, 39.5, date(2026, 10, 9)])
+            availability.append(["Pacific", "Myrtle Green 60cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.append(["Pacific", "Greens Sampler", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.append(["Pacific", "Parvifolia Green 50cm", "Bunch", "L", 10, 10, 1, 4.0, date(2026, 10, 9)])
+            availability.append(["Pacific", "Honey Bracelet Green 60cm", "Bunch", "L", 15, 12, 2, 4.6, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I6"))
+            workbook.save(source)
+            workbook.close()
+
+            variants = rebuild_customer_view_from_availability(source)
+
+            result = load_workbook(source, data_only=False)
+            try:
+                customer = result["Customer View"]
+                self.assertEqual(variants, 5)
+                self.assertEqual(customer["G6"].value, "Boxes available by Truck Load Date")
+                self.assertTrue(customer["G6"].alignment.wrap_text)
+                self.assertGreaterEqual(customer.row_dimensions[6].height, 45)
+                category_rows = {
+                    customer.cell(row=row, column=4).value: row
+                    for row in range(9, customer.max_row + 1)
+                    if customer.cell(row=row, column=4).value in {"GREENS", "MIXED BOXES"}
+                }
+                self.assertEqual(list(category_rows), ["GREENS", "MIXED BOXES"])
+                greens_row = category_rows["GREENS"]
+                mixed_row = category_rows["MIXED BOXES"]
+                self.assertEqual(
+                    [customer.cell(row=row, column=1).value for row in range(greens_row + 1, mixed_row)],
+                    ["Honey Bracelet Green 60cm", "Myrtle Green 60cm", "Parvifolia Green 50cm"],
+                )
+                self.assertEqual(
+                    [customer.cell(row=row, column=1).value for row in range(mixed_row + 1, mixed_row + 3)],
+                    ["Day of Dead Mixed Box", "California Greens Mixed Box"],
+                )
+                self.assertEqual(result["Availability"]["B2"].value, "Day of Dead Sampler")
+                self.assertEqual(result["Availability"]["B4"].value, "Greens Sampler")
             finally:
                 result.close()
 
@@ -381,6 +628,80 @@ class InventoryBoxTransformTests(unittest.TestCase):
                 self.assertEqual(result.active["A4"].value, "A")
                 self.assertEqual(result.active["A5"].value, "B")
                 self.assertEqual(result.active["A5"]._style, result.active["A3"]._style)
+            finally:
+                result.close()
+
+    def test_omits_customer_view_variants_with_no_positive_quantities(self) -> None:
+        self.assertIsNotNone(rebuild_customer_view_from_availability)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            workbook = Workbook()
+            customer = workbook.active
+            customer.title = "Customer View"
+            availability = workbook.create_sheet("Availability")
+            availability.append(
+                [
+                    "Vendor Name",
+                    "Product Description",
+                    "Unit of Sale",
+                    "Package Type",
+                    "Pack",
+                    "Units / Pack",
+                    "Qty Packages",
+                    "Price",
+                    "Available From",
+                ]
+            )
+            availability.append(["Pacific", "Marigold Orange", "Bunch", "L", 5, 10, 2, 3.10, date(2026, 10, 9)])
+            availability.append(["Pacific", "Celosia Orange", "Bunch", "D", 10, 10, 0, 5.20, date(2026, 10, 9)])
+            availability.add_table(Table(displayName="tblAvailability2", ref="A1:I3"))
+            workbook.save(source)
+            workbook.close()
+
+            variants = rebuild_customer_view_from_availability(source)
+
+            result = load_workbook(source, data_only=False)
+            try:
+                customer = result["Customer View"]
+                self.assertEqual(variants, 1)
+                values = [
+                    customer.cell(row=row, column=1).value
+                    for row in range(1, customer.max_row + 1)
+                ]
+                self.assertIn("Marigold Orange", values)
+                self.assertNotIn("Celosia Orange", values)
+                self.assertEqual(customer["G8"].value.date(), date(2026, 10, 9))
+                self.assertIsNone(customer["H8"].value)
+                self.assertIsNone(customer["H8"].fill.fill_type)
+                self.assertIsNone(customer["H9"].fill.fill_type)
+            finally:
+                result.close()
+
+    def test_ignores_formatted_blank_columns_after_availability_data(self) -> None:
+        self.assertIsNotNone(transform_inventory_workbook)
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.xlsx"
+            output = Path(temp_dir) / "output.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Availability"
+            sheet.append(["Product Description", "Available From"])
+            sheet.append(["A", date(2026, 9, 14)])
+            sheet["D2"].fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+            sheet["D3"].fill = PatternFill(fill_type="solid", fgColor="00FF00")
+            workbook.save(source)
+            workbook.close()
+
+            transform_inventory_workbook(
+                source,
+                output,
+                assumed_today=self.assumed_today,
+            )
+
+            result = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(result["Availability"]["A3"].value, "A")
+                self.assertEqual(result["Availability"]["B3"].value.date(), date(2026, 9, 15))
             finally:
                 result.close()
 

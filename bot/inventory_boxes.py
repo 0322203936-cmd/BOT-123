@@ -7,7 +7,6 @@ from pathlib import Path
 from time import monotonic
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from openpyxl import load_workbook
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from sharepoint_sync import (
@@ -43,8 +42,6 @@ SOURCE_FILENAME = "inventory-upload-boxes-source.xlsx"
 MAX_DELETE_BATCHES = 50
 CONFIRMATION_DIALOG_WAIT_MS = 12_000
 INVENTORY_READY_WAIT_MS = 120_000
-UPLOAD_VERIFY_WAIT_MS = 180_000
-UPLOAD_VERIFY_POLL_MS = 5_000
 SELECTION_RETRY_ATTEMPTS = 3
 
 
@@ -69,6 +66,14 @@ def visible_locator(locator) -> object | None:
                 return candidate
         except Exception:
             continue
+    return None
+
+
+def first_visible_locator(locators: list) -> object | None:
+    for locator in locators:
+        found = visible_locator(locator)
+        if found is not None:
+            return found
     return None
 
 
@@ -155,18 +160,24 @@ def login_kometsales(page: Page, user: str, password: str) -> None:
 
 def open_boxes(page: Page, user: str, password: str) -> None:
     print("Abriendo Inventario > Cajas...", flush=True)
+    inventory_menu = [
+        page.get_by_role("button", name=re.compile(r"inventario", re.I)),
+        page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
+    ]
+    boxes_menu = [
+        page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+        page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+        page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
+    ]
     for attempt in range(1, 3):
         try:
-            click_first_visible(
-                page,
-                [
-                    page.get_by_role("button", name=re.compile(r"inventario", re.I)),
-                    page.get_by_text(re.compile(r"^\s*INVENTARIO\s*$", re.I)),
-                ],
-                "Inventario",
-            )
-            page.wait_for_timeout(700)
-            click_text(page, "Cajas")
+            # Después de iniciar sesión Komet suele dejar Inventario ya
+            # desplegado. Volver a hacer clic ahí lo contrae y oculta Cajas.
+            # Solo abrir el menú cuando Cajas todavía no está visible.
+            if first_visible_locator(boxes_menu) is None:
+                click_first_visible(page, inventory_menu, "Inventario")
+                page.wait_for_timeout(700)
+            click_first_visible(page, boxes_menu, "Cajas")
             page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
         except (PlaywrightTimeoutError, RuntimeError):
             print("Aviso: no se pudo navegar por el menú; abriendo Cajas por su ruta directa.", flush=True)
@@ -332,66 +343,30 @@ def wait_for_inventory_ready(page: Page) -> None:
     )
 
 
-def workbook_has_positive_availability(workbook_path: Path) -> bool:
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+def refresh_boxes_after_upload(page: Page) -> None:
+    """Refresh Cajas once without blocking the email on asynchronous processing."""
     try:
-        if "Availability" not in workbook.sheetnames:
-            raise RuntimeError("El archivo preparado no contiene la pestaña Availability.")
-        worksheet = workbook["Availability"]
-        quantity_column = None
-        header_row = None
-        for row in worksheet.iter_rows(min_row=1, max_row=min(20, worksheet.max_row)):
-            headers = {
-                str(cell.value or "").strip().casefold(): cell.column
-                for cell in row
-                if cell.value not in (None, "")
-            }
-            if "qty packages" in headers:
-                quantity_column = headers["qty packages"]
-                header_row = row[0].row
-                break
-        if quantity_column is None or header_row is None:
-            raise RuntimeError("El archivo preparado no contiene la columna Qty Packages.")
-        for row in worksheet.iter_rows(
-            min_row=header_row + 1,
-            min_col=quantity_column,
-            max_col=quantity_column,
-            values_only=True,
-        ):
-            value = row[0]
-            if isinstance(value, bool) or value in (None, ""):
-                continue
-            try:
-                if float(str(value).replace(",", "").strip()) > 0:
-                    return True
-            except ValueError:
-                continue
-        return False
-    finally:
-        workbook.close()
-
-
-def wait_for_uploaded_inventory(page: Page, workbook_path: Path) -> None:
-    if not workbook_has_positive_availability(workbook_path):
+        click_first_visible(
+            page,
+            [
+                page.get_by_role("link", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                page.get_by_role("button", name=re.compile(r"^\s*Cajas\s*$", re.I)),
+                page.get_by_text(re.compile(r"^\s*Cajas\s*$", re.I)),
+            ],
+            "Cajas para actualizar el inventario",
+        )
+        page.wait_for_url("**/inventory-pricing/list_pricing.do**", timeout=30_000)
+    except (PlaywrightTimeoutError, RuntimeError):
         print(
-            "Availability no contiene cantidades mayores que cero; se espera que Komet quede vacío.",
+            "Aviso: no se pudo actualizar Cajas mediante el menú; se abrirá la ruta directa.",
             flush=True,
         )
-        return
-
-    deadline = monotonic() + UPLOAD_VERIFY_WAIT_MS / 1_000
-    while monotonic() < deadline:
         page.goto(KOMET_BOXES_URL, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(1_500)
-        wait_for_network(page, timeout=30_000)
-        if not inventory_is_empty(page):
-            print("Komet confirmó que ya aparecen cajas después de procesar el XLS.", flush=True)
-            return
-        page.wait_for_timeout(UPLOAD_VERIFY_POLL_MS)
-
-    raise RuntimeError(
-        "Komet programó el XLS, pero no mostró cajas después de esperar el procesamiento. "
-        "No se marcará la carga como completada."
+    page.wait_for_timeout(3_000)
+    print(
+        "Carga de Komet aceptada; la actualización de la tabla continuará en segundo plano. "
+        "No se bloqueará el correo esperando a que aparezcan las cajas.",
+        flush=True,
     )
 
 
@@ -627,12 +602,15 @@ def upload_boxes(page: Page, workbook_path: Path) -> None:
         if any(visible_locator(locator) is not None for locator in error_candidates):
             raise RuntimeError("Kometsales mostró un error después de intentar cargar el XLS.") from exc
         print(
-            "Aviso: Kometsales no mostró el aviso de programación; se verificará la tabla de cajas.",
+            "Aviso: Kometsales no mostró el aviso de programación; se continuará porque no mostró un error.",
             flush=True,
         )
-    wait_for_uploaded_inventory(page, workbook_path)
-    capture(page, "04_carga_completada.png")
-    print("XLS de cajas cargado correctamente en Kometsales.", flush=True)
+    refresh_boxes_after_upload(page)
+    capture(page, "04_carga_programada.png")
+    print(
+        "XLS de cajas programado correctamente en Kometsales; se continuará con el correo.",
+        flush=True,
+    )
 
 
 def current_local_date() -> date:
@@ -697,6 +675,7 @@ def download_and_prepare_source(komet_inventory_path: Path | None) -> tuple[str,
         f"total_antes={inventory_result.before_total:g} total_despues={inventory_result.after_total:g} "
         f"formulas_reemplazadas={inventory_result.formula_cells_replaced} "
         f"filas_eliminadas={date_result.removed_rows} filas_agregadas={date_result.added_rows} "
+        f"cajas_trasladadas={date_result.carried_boxes:g} "
         f"domingos_finales={date_result.final_sunday_rows} "
         f"fechas_inmediatas_finales={date_result.final_immediate_rows}",
         flush=True,
