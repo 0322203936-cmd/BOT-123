@@ -250,7 +250,10 @@ def prepare_pdf_copy(source: Path, destination: Path) -> dict[str, object]:
 def upload_temporary_workbook(token: str, item: dict, workbook_path: Path) -> dict:
     drive_id = item["parentReference"]["driveId"]
     parent_id = item["parentReference"]["id"]
-    filename = f".codex-generar-orden-{uuid4().hex}.xlsm"
+    # Keep the temporary item out of the normal workbook view, but do not use
+    # a dot-prefixed filename. Graph's Excel conversion service can reject
+    # hidden drive items with HTTP 406 even though the upload itself succeeds.
+    filename = f"codex-generar-orden-{uuid4().hex}.xlsm"
     upload_url = (
         f"{GRAPH_URL}/drives/{drive_id}/items/{parent_id}:/{quote(filename, safe='')}:/content"
     )
@@ -268,15 +271,42 @@ def upload_temporary_workbook(token: str, item: dict, workbook_path: Path) -> di
 
 def convert_to_pdf(token: str, item: dict, destination: Path) -> None:
     drive_id = item["parentReference"]["driveId"]
-    response = request_graph(
-        "GET",
-        f"{GRAPH_URL}/drives/{drive_id}/items/{item['id']}/content?format=pdf",
-        graph_headers(token),
-        timeout=240,
-    )
-    if not response.content.startswith(b"%PDF"):
-        raise RuntimeError("Graph no devolvió un PDF válido al convertir el libro.")
-    destination.write_bytes(response.content)
+    url = f"{GRAPH_URL}/drives/{drive_id}/items/{item['id']}/content?format=pdf"
+    # Ask Graph explicitly for the PDF representation. Without Accept, the
+    # conversion endpoint can answer 406 with an empty body.
+    pdf_headers = {
+        **graph_headers(token),
+        "Accept": "application/pdf",
+        "Cache-Control": "no-cache",
+    }
+
+    last_error: RuntimeError | None = None
+    for attempt in range(1, 5):
+        try:
+            response = request_graph(
+                "GET",
+                url,
+                pdf_headers,
+                timeout=240,
+            )
+            if not response.content.startswith(b"%PDF"):
+                raise RuntimeError("Graph no devolvió un PDF válido al convertir el libro.")
+            destination.write_bytes(response.content)
+            return
+        except RuntimeError as error:
+            last_error = error
+            if "respondió 406" not in str(error) or attempt == 4:
+                raise
+            delay = min(attempt * 5, 20)
+            print(
+                f"Graph aún no ofrece el PDF (intento {attempt}/4); "
+                f"reintentando en {delay}s...",
+                flush=True,
+            )
+            time.sleep(delay)
+
+    if last_error is not None:
+        raise last_error
 
 
 def delete_temporary_workbook(token: str, item: dict) -> None:
