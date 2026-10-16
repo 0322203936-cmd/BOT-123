@@ -1,0 +1,51 @@
+name: Atajos Wholesale - Enviar PDF por correo
+
+on:
+  workflow_run:
+    workflows:
+      - Atajos Wholesale - Ejecutar Generar Orden
+      - Atajos Wholesale - Ejecutar Generar Passing Sheet
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  enviar-pdf:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r bot/requirements.txt
+
+      - name: Descargar PDF generado
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: reportes-wholesale-*
+          path: artifacts/wholesale_email
+          merge-multiple: true
+
+      - name: Enviar PDF a Jesús
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
+          WHOLESALE_PDF_ARTIFACT_DIR: artifacts/wholesale_email
+          WHOLESALE_PDF_RECIPIENT: jesus.sandoval@cfbc.co
+          WHOLESALE_PDF_LABEL: ${{ github.event.workflow_run.name }}
+        run: python -u bot/send_wholesale_pdf_email.py
