@@ -18,14 +18,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
+from zipfile import ZipFile
 
 import requests
-from openpyxl import load_workbook
 
 from sharepoint_sync import (
     GRAPH_URL,
@@ -93,38 +94,123 @@ def download_workbook(token: str, item: dict, destination: Path) -> None:
     destination.write_bytes(response.content)
 
 
+def _replace_sheet_visibility(workbook_xml: str) -> tuple[str, int, int]:
+    sheet_pattern = re.compile(r"<sheet\b[^>]*?(?:/>|></sheet>)")
+    sheet_names = re.findall(r'<sheet\b[^>]*\bname="([^"]+)"', workbook_xml)
+    if TARGET_SHEET not in sheet_names:
+        raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
+    target_index = sheet_names.index(TARGET_SHEET)
+
+    def rewrite(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        name_match = re.search(r'\bname="([^"]+)"', tag)
+        name = name_match.group(1) if name_match else ""
+        tag = re.sub(r'\sstate="[^"]*"', "", tag)
+        if name != TARGET_SHEET:
+            if tag.rstrip().endswith("/>"):
+                tag = tag.rstrip()[:-2].rstrip() + ' state="hidden" />'
+            else:
+                tag = tag.replace(">", ' state="hidden">', 1)
+        return tag
+
+    updated = sheet_pattern.sub(rewrite, workbook_xml)
+    active = re.search(r"<workbookView\b[^>]*", updated)
+    if not active:
+        raise RuntimeError("El libro no contiene workbookView para activar PO Nuevo.")
+    active_tag = active.group(0)
+    if re.search(r'\bactiveTab="[^"]*"', active_tag):
+        updated = updated[: active.start()] + re.sub(
+            r'\bactiveTab="[^"]*"',
+            f'activeTab="{target_index}"',
+            active_tag,
+            count=1,
+        ) + updated[active.end() :]
+    else:
+        replacement = active_tag.rstrip() + f' activeTab="{target_index}"'
+        updated = updated[: active.start()] + replacement + updated[active.end() :]
+    return updated, target_index, len(sheet_names)
+
+
+def _replace_print_area(workbook_xml: str, target_index: int) -> str:
+    print_area = "'PO Nuevo'!$A$1:$I$40"
+    for name in ("_xlnm.Print_Area", "Print_Area"):
+        pattern = re.compile(
+            rf'(<definedName\b[^>]*\bname="{re.escape(name)}"[^>]*\blocalSheetId="{target_index}"[^>]*>).*?(</definedName>)'
+        )
+        workbook_xml, count = pattern.subn(rf"\g<1>{print_area}\g<2>", workbook_xml, count=1)
+        if count == 0:
+            raise RuntimeError(f"No se encontró el área de impresión {name!r} de PO Nuevo.")
+    return workbook_xml
+
+
+def _target_worksheet_path(workbook_xml: str, relationships_xml: str) -> str:
+    sheet_match = re.search(
+        rf'<sheet\b[^>]*\bname="{re.escape(TARGET_SHEET)}"[^>]*\br:id="([^"]+)"',
+        workbook_xml,
+    )
+    if not sheet_match:
+        raise RuntimeError(f"No se pudo resolver el XML de la hoja {TARGET_SHEET!r}.")
+    relationship_id = sheet_match.group(1)
+    relationship = re.search(
+        rf'<(?:[A-Za-z0-9_]+:)?Relationship\b[^>]*\bId="{re.escape(relationship_id)}"[^>]*\bTarget="([^"]+)"',
+        relationships_xml,
+    )
+    if not relationship:
+        raise RuntimeError(f"No se encontró la relación XML de {TARGET_SHEET!r}.")
+    target = relationship.group(1).lstrip("/")
+    return target if target.startswith("xl/") else f"xl/{target}"
+
+
+def _replace_page_setup(sheet_xml: str) -> str:
+    pattern = re.compile(r"<pageSetup\b[^>]*/>")
+    match = pattern.search(sheet_xml)
+    if not match:
+        raise RuntimeError(f"La hoja {TARGET_SHEET!r} no contiene configuración de impresión.")
+    tag = match.group(0)
+    tag = re.sub(r'\sorientation="[^"]*"', '', tag)
+    tag = re.sub(r'\spaperSize="[^"]*"', '', tag)
+    tag = tag.rstrip()[:-2].rstrip() + ' orientation="portrait" paperSize="1" />'
+    return sheet_xml[: match.start()] + tag + sheet_xml[match.end() :]
+
+
 def prepare_pdf_copy(source: Path, destination: Path) -> dict[str, object]:
-    """Mirror the Office Script's workbook-only PDF preparation."""
-    workbook = load_workbook(source, keep_vba=True, keep_links=True, data_only=False)
-    try:
-        if TARGET_SHEET not in workbook.sheetnames:
-            raise RuntimeError(f"El libro no contiene la hoja {TARGET_SHEET!r}.")
+    """Mirror the Office Script by changing only the XLSM XML settings.
 
-        target_index = workbook.sheetnames.index(TARGET_SHEET)
-        target = workbook[TARGET_SHEET]
+    Using a ZIP-level patch is intentional.  Loading/saving with a general
+    workbook library can discard Excel extensions and cached formula values;
+    the temporary PDF copy must retain the original workbook package exactly.
+    """
+    with ZipFile(source, "r") as source_zip:
+        workbook_xml = source_zip.read("xl/workbook.xml").decode("utf-8")
+        relationships_xml = source_zip.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+        workbook_xml, target_index, sheet_count = _replace_sheet_visibility(workbook_xml)
+        workbook_xml = _replace_print_area(workbook_xml, target_index)
+        target_path = _target_worksheet_path(workbook_xml, relationships_xml)
+        target_sheet_xml = _replace_page_setup(
+            source_zip.read(target_path).decode("utf-8")
+        )
 
-        # Equivalent to setVisibility(visible), activate(), and hiding every
-        # other sheet in the Office Script.
-        for sheet in workbook.worksheets:
-            sheet.sheet_state = "visible" if sheet is target else "hidden"
-            sheet.sheet_view.tabSelected = sheet is target
+        with ZipFile(destination, "w") as destination_zip:
+            for info in source_zip.infolist():
+                content = source_zip.read(info.filename)
+                if info.filename == "xl/workbook.xml":
+                    content = workbook_xml.encode("utf-8")
+                elif info.filename == target_path:
+                    content = target_sheet_xml.encode("utf-8")
+                destination_zip.writestr(info, content)
 
-        # Equivalent to layout.setPrintArea("A1:I40"), portrait, letter.
-        target.print_area = PRINT_AREA
-        target.page_setup.orientation = target.ORIENTATION_PORTRAIT
-        target.page_setup.paperSize = target.PAPERSIZE_LETTER
-        workbook.views[0].activeTab = target_index
+    with ZipFile(source, "r") as original_zip, ZipFile(destination, "r") as copy_zip:
+        if original_zip.read("xl/vbaProject.bin") != copy_zip.read("xl/vbaProject.bin"):
+            raise RuntimeError("La copia temporal no conservó el proyecto VBA.")
 
-        workbook.save(destination)
-        return {
-            "sheet": TARGET_SHEET,
-            "print_area": PRINT_AREA,
-            "orientation": "portrait",
-            "paper": "letter",
-            "sheet_count": len(workbook.sheetnames),
-        }
-    finally:
-        workbook.close()
+    return {
+        "sheet": TARGET_SHEET,
+        "print_area": PRINT_AREA,
+        "orientation": "portrait",
+        "paper": "letter",
+        "sheet_count": sheet_count,
+        "package_mode": "XML patch; formulas, macros y objetos conservados",
+    }
 
 
 def upload_temporary_workbook(token: str, item: dict, workbook_path: Path) -> dict:
