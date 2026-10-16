@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 import time
 import posixpath
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -405,6 +406,67 @@ def _preserve_target_drawing(source: Path, destination: Path) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _extract_pacifica_logo(workbook_path: Path, destination: Path) -> bool:
+    """Extract the Pacifica image embedded in the source Excel workbook."""
+    with ZipFile(workbook_path, "r") as workbook_zip:
+        image_parts = [
+            name
+            for name in workbook_zip.namelist()
+            if name.startswith("xl/media/") and name.lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
+        if not image_parts:
+            return False
+        destination.write_bytes(workbook_zip.read(image_parts[0]))
+    return True
+
+
+def add_pacifica_logo_to_pdf(pdf_path: Path, logo_path: Path) -> None:
+    """Draw the logo directly on the first page after Graph conversion.
+
+    Graph converts the worksheet reliably but does not render its embedded
+    image.  Adding the same image to the resulting PDF is deterministic and
+    keeps the normal Graph conversion fast.
+    """
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    reader = PdfReader(str(pdf_path))
+    if not reader.pages:
+        raise RuntimeError("El PDF generado no contiene páginas para agregar el logo.")
+    first_page = reader.pages[0]
+    width = float(first_page.mediabox.width)
+    height = float(first_page.mediabox.height)
+    overlay_stream = BytesIO()
+    overlay = canvas.Canvas(overlay_stream, pagesize=(width, height))
+    # Header, directly above the company title.  The fixed position follows
+    # the Letter portrait layout used by PO Nuevo and avoids the order table.
+    overlay.drawImage(
+        ImageReader(str(logo_path)),
+        56,
+        height - 82,
+        width=88,
+        height=69,
+        preserveAspectRatio=True,
+        anchor="sw",
+        mask="auto",
+    )
+    overlay.save()
+    overlay_stream.seek(0)
+    logo_page = PdfReader(overlay_stream).pages[0]
+    first_page.merge_page(logo_page, over=True)
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    temporary = pdf_path.with_suffix(".with-logo.pdf")
+    try:
+        with temporary.open("wb") as output:
+            writer.write(output)
+        temporary.replace(pdf_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
     """Create a Graph-compatible copy while keeping the original logo."""
     metadata = _read_order_metadata(source)
@@ -602,6 +664,8 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="wholesale-generar-orden-") as temp_dir:
             source = Path(temp_dir) / "source.xlsm"
             download_workbook(token, item, source)
+            logo_path = Path(temp_dir) / "pacifica-logo.png"
+            has_logo = _extract_pacifica_logo(source, logo_path)
             pdf_path = ARTIFACT_DIR / PDF_FILENAME
             clean_xlsx = Path(temp_dir) / "prepared-for-pdf.xlsx"
             order_metadata = prepare_clean_xlsx_copy(source, clean_xlsx)
@@ -638,6 +702,11 @@ def main() -> None:
                 )
                 convert_with_libreoffice(clean_xlsx, pdf_path)
                 summary["pdf_fallback"] = "LibreOffice from fast clean PO Nuevo XLSX"
+            if TARGET_SHEET == "PO Nuevo" and has_logo:
+                add_pacifica_logo_to_pdf(pdf_path, logo_path)
+                summary["logo"] = "Pacifica logo added directly to final PDF"
+            elif TARGET_SHEET == "PO Nuevo":
+                summary["logo"] = "Pacifica logo not found in source workbook"
             summary.update(
                 {
                     "status": "completed",
