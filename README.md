@@ -74,7 +74,7 @@ Requisitos: Node.js 22.12 o posterior y npm.
 
 1. Copia `.env.example` como `.env`.
 2. Configura `GITHUB_TOKEN` con un token fine-grained que tenga acceso a `BOT-GALLERIA` y `BOT-123`, con permisos **Actions: Read and write** y **Contents: Read-only**.
-3. Cambia `APP_PASSWORD` por una contraseña privada para proteger los botones.
+3. El panel no solicita contraseña; conserva los secretos de integración sólo en el servidor.
 4. Instala y ejecuta:
 
 ```powershell
@@ -95,7 +95,6 @@ El archivo `render.yaml` contiene toda la configuración del servicio.
 2. En Render selecciona **New > Blueprint** y conecta ese repositorio.
 3. Render solicitará los valores secretos:
    - `GITHUB_TOKEN`: token nuevo de GitHub con los permisos indicados arriba.
-   - `APP_PASSWORD`: contraseña que usarás para entrar al panel.
 4. Crea el servicio y espera a que el health check `/api/health` sea correcto.
 
 No reutilices el token que estaba escrito en la URL remota de `BOT-GALLERIA`: revócalo y crea uno nuevo.

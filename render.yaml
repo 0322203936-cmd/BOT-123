@@ -21,8 +21,6 @@ services:
         value: main
       - key: GITHUB_TOKEN
         sync: false
-      - key: APP_PASSWORD
-        sync: false
       - key: FACTURAS_KOMET_CRON_SECRET
         sync: false
       - key: SHAREPOINT_TENANT_ID

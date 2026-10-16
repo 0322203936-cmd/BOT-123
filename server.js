@@ -11,7 +11,6 @@ const port = Number(process.env.PORT) || 3000;
 const owner = process.env.GITHUB_OWNER || '0322203936-cmd';
 const branch = process.env.GITHUB_BRANCH || 'main';
 const githubToken = process.env.GITHUB_TOKEN || '';
-const appPassword = process.env.APP_PASSWORD || '';
 const facturasCronSecret = process.env.FACTURAS_KOMET_CRON_SECRET || '';
 
 const workflows = {
@@ -273,14 +272,10 @@ function secretsMatch(received, expectedSecret) {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
-function passwordsMatch(received) {
-  return secretsMatch(received, appPassword);
-}
-
-function authenticate(req, res, next) {
-  if (!passwordsMatch(req.get('X-App-Password'))) {
-    return res.status(401).json({ message: 'La contraseña no es correcta.' });
-  }
+// El panel de Atajos es público por decisión operativa. Los secretos de
+// GitHub, Graph y el programador permanecen únicamente en las variables del
+// servidor y nunca se envían al navegador.
+function authenticate(_req, _res, next) {
   next();
 }
 
@@ -292,9 +287,6 @@ function authenticateFacturasCron(req, res, next) {
 }
 
 function requireWriteAuthentication(req, res, next) {
-  if (!appPassword) {
-    return res.status(503).json({ message: 'Falta configurar APP_PASSWORD en Render para guardar esta configuración.' });
-  }
   return authenticate(req, res, next);
 }
 
@@ -913,7 +905,7 @@ async function dispatchWorkflow(key) {
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/config', (_req, res) => {
-  res.json({ authRequired: Boolean(appPassword), configured: Boolean(githubToken) });
+  res.json({ authRequired: false, configured: Boolean(githubToken) });
 });
 
 app.get('/api/workflows/cajas/email-config', authenticate, async (_req, res, next) => {
