@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -291,7 +292,7 @@ def prepare_pdf_xlsx_copy(source: Path, destination: Path) -> None:
             destination_zip.writestr(info, content)
 
 
-def prepare_clean_xlsx_copy(source: Path, destination: Path) -> None:
+def prepare_clean_xlsx_copy(source: Path, destination: Path) -> dict[str, str]:
     """Create a macro-free PDF copy with PO Nuevo as the sole visible sheet.
 
     The support sheets stay inside this temporary workbook, but hidden.  That
@@ -333,6 +334,21 @@ def prepare_clean_xlsx_copy(source: Path, destination: Path) -> None:
         workbook.calculation.fullCalcOnLoad = True
         workbook.calculation.forceFullCalc = True
         workbook.save(destination)
+        order_values = values_workbook[
+            "PO Nuevo" if "PO Nuevo" in values_workbook.sheetnames else TARGET_SHEET
+        ]
+        customer = str(order_values["F11"].value or "Cliente").strip()
+        load_date_value = order_values["B19"].value
+        if not isinstance(load_date_value, (date, datetime)):
+            tender_date = order_values["F19"].value
+            if isinstance(tender_date, (date, datetime)):
+                load_date_value = tender_date - timedelta(days=1)
+        load_date = (
+            load_date_value.strftime("%m/%d/%Y")
+            if isinstance(load_date_value, (date, datetime))
+            else str(load_date_value or "Sin fecha").strip()
+        )
+        return {"customer": customer or "Cliente", "load_date": load_date or "Sin fecha"}
     finally:
         workbook.close()
         values_workbook.close()
@@ -494,7 +510,12 @@ def main() -> None:
             download_workbook(token, item, source)
             pdf_path = ARTIFACT_DIR / PDF_FILENAME
             clean_xlsx = Path(temp_dir) / "prepared-for-pdf.xlsx"
-            prepare_clean_xlsx_copy(source, clean_xlsx)
+            order_metadata = prepare_clean_xlsx_copy(source, clean_xlsx)
+            document_kind = "Orden" if TARGET_SHEET == "PO Nuevo" else "Passing Sheet"
+            summary["order_email"] = {
+                **order_metadata,
+                "document_kind": document_kind,
+            }
             summary["preparation"] = {
                 "sheet": TARGET_SHEET,
                 "print_area": PRINT_AREA,

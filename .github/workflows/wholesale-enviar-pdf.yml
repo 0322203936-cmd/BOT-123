@@ -47,5 +47,4 @@ jobs:
           MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
           WHOLESALE_PDF_ARTIFACT_DIR: artifacts/wholesale_email
           WHOLESALE_PDF_RECIPIENT: jesus.sandoval@cfbc.co
-          WHOLESALE_PDF_LABEL: ${{ github.event.workflow_run.name }}
         run: python -u bot/send_wholesale_pdf_email.py
