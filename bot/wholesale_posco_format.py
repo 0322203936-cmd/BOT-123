@@ -8,6 +8,7 @@ current ``PO Nuevo`` and ``Productos`` sheets from the Wholesale workbook.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
 import re
 
@@ -97,11 +98,39 @@ def load_products_lookup(sheet) -> dict[str, list[dict[str, str]]]:
     return lookup
 
 
-def _select_product(candidates: list[dict[str, str]], box: str) -> dict[str, str] | None:
+def _select_product(
+    lookup: dict[str, list[dict[str, str]]],
+    description: str,
+    color: str,
+    box: str,
+) -> dict[str, str] | None:
+    """Resolve a known product using its description, color and box.
+
+    POSCO descriptions can contain harmless spelling differences (for example
+    ``ASSORTED`` versus the historic ``ASSORED`` recorded in Productos).  A
+    close match is allowed only after the supplied color and box reduce it to
+    one product, so similar products never become a false homologation.
+    """
+    candidates = lookup.get(normalize_description(description), [])
+    if not candidates:
+        normalized = normalize_description(description)
+        close_keys = [
+            key
+            for key in lookup
+            if SequenceMatcher(None, normalized, key).ratio() >= 0.92
+        ]
+        candidates = [candidate for key in close_keys for candidate in lookup[key]]
     if not candidates:
         return None
     exact_box = [candidate for candidate in candidates if clean(candidate["caja"]).casefold() == box.casefold()]
     selected = exact_box or candidates
+    if color:
+        exact_color = [
+            candidate
+            for candidate in selected
+            if clean(candidate["flor color"]).casefold() == color.casefold()
+        ]
+        selected = exact_color or selected
     # A description must map to one unique product.  A similarly named item
     # with a different box is ambiguous and must wait for its BOOM mapping.
     return selected[0] if len(selected) == 1 else None
@@ -136,7 +165,7 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
             box_input = clean(order_sheet.cell(row_number, 6).value)
             stems = required_positive_int(stems_input, f"STEM/BCH de la fila {row_number}")
             bunches = required_positive_int(bunches_input, f"BU/BOX de la fila {row_number}")
-            product = _select_product(products.get(normalize_description(description_input), []), box_input)
+            product = _select_product(products, description_input, color_input, box_input)
 
             if product:
                 description = product["descripcion"]

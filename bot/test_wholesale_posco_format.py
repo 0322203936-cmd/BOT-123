@@ -37,7 +37,8 @@ class WholesalePoscoFormatTests(unittest.TestCase):
         order["F11"] = "Mex y Can USA"
         order["F15"] = "TPI"
         order["B19"] = datetime(2026, 10, 15)
-        order["B22"] = "WS MARIGOLD ASSORTED 55ST PK10"
+        order["B22"] = "WS MARIGOLD ASSORTED 5ST PK10"
+        order["C22"] = "ORANGE"
         order["D22"] = 5
         order["E22"] = 10
         order["F22"] = "F4P"
@@ -53,7 +54,7 @@ class WholesalePoscoFormatTests(unittest.TestCase):
         ])
         products.append([
             "PACIFICA PRODUCE FARMS", "WHOLESALE", "CB / BULK", "MARIGOLD",
-            "ORANGE", "WS MARIGOLD ASSORTED 55ST PK10", "5", "10", "F4P",
+            "ORANGE", "WS MARIGOLD ASSORED 5ST PK10", "5", "10", "F4P",
         ])
         workbook.save(path)
         workbook.close()
@@ -78,7 +79,7 @@ class WholesalePoscoFormatTests(unittest.TestCase):
                     sheet = workbook["New Order"]
                     self.assertEqual(sheet["A2"].value, "PACIFICA PRODUCE FARMS")
                     self.assertEqual(sheet["B2"].value, "WHOLESALE")
-                    self.assertEqual(sheet["C2"].value, "WS MARIGOLD ASSORTED 55ST PK10")
+                    self.assertEqual(sheet["C2"].value, "WS MARIGOLD ASSORED 5ST PK10")
                     self.assertEqual(sheet["F2"].value, "MARIGOLD")
                     self.assertEqual(sheet["G2"].value, "ORANGE")
                     self.assertEqual(sheet["M2"].value, "F4P")
