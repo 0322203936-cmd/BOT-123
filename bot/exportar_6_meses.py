@@ -126,10 +126,11 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_last_month(page: Page) -> tuple[date, date]:
-    """Filter POSCO orders from one calendar month ago through today."""
+def set_load_date_september_window(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from August 15 through September 15 of the current year."""
     today = datetime.now(BOT_TIMEZONE).date()
-    start_date = add_calendar_months(today, -1)
+    end_date = date(today.year, 9, 15)
+    start_date = add_calendar_months(end_date, -1)
     menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
     menor_input_type = (menor.get_attribute("type") or "text").lower()
@@ -140,19 +141,19 @@ def set_load_date_last_month(page: Page) -> tuple[date, date]:
         else start_date.strftime("%m/%d/%Y")
     )
     end_formatted = (
-        today.isoformat()
+        end_date.isoformat()
         if mayor_input_type == "date"
-        else today.strftime("%m/%d/%Y")
+        else end_date.strftime("%m/%d/%Y")
     )
     menor.fill(start_formatted)
     mayor.fill(end_formatted)
     mayor.press("Tab")
     print(
-        f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={today.isoformat()} "
-        f"(último mes calendario).",
+        f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={end_date.isoformat()} "
+        f"(del 15 de agosto al 15 de septiembre del año actual).",
         flush=True,
     )
-    return start_date, today
+    return start_date, end_date
 
 
 def click_search(page: Page) -> None:
@@ -228,9 +229,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Filtrando Load Date del último mes hasta hoy...", flush=True)
-            start_date, end_date = set_load_date_last_month(page)
-            capture(page, "05_rango_ultimo_mes.png")
+            print("Filtrando Load Date del 15 de agosto al 15 de septiembre...", flush=True)
+            start_date, end_date = set_load_date_september_window(page)
+            capture(page, "05_rango_15_agosto_a_15_septiembre.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
@@ -249,7 +250,7 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_1_MES_OK load_date_menor={start_date.isoformat()} "
+                f"EXPORTAR_SEPTIEMBRE_OK load_date_menor={start_date.isoformat()} "
                 f"load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
