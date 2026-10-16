@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { EditorComponent } from '@tinymce/tinymce-angular';
 import { firstValueFrom } from 'rxjs';
 
-type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas' | 'facturasKomet' | 'wholesaleGenerarOrden' | 'wholesaleGenerarPassingSheet';
+type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas' | 'cajasMassEmail' | 'facturasKomet' | 'wholesaleGenerarOrden' | 'wholesaleGenerarPassingSheet';
 type EmailPanelMode = 'cajas' | 'masivo';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
@@ -89,7 +89,8 @@ export class App implements OnInit, OnDestroy {
     this.workflows().filter(
       (workflow) => workflow.key !== 'cancelaciones'
         && workflow.key !== 'wholesaleGenerarOrden'
-        && workflow.key !== 'wholesaleGenerarPassingSheet',
+        && workflow.key !== 'wholesaleGenerarPassingSheet'
+        && workflow.key !== 'cajasMassEmail',
     ),
   );
   protected readonly wholesaleWorkflow = computed(
@@ -97,6 +98,9 @@ export class App implements OnInit, OnDestroy {
   );
   protected readonly wholesalePassingSheetWorkflow = computed(
     () => this.workflows().find((workflow) => workflow.key === 'wholesaleGenerarPassingSheet') ?? null,
+  );
+  protected readonly massEmailWorkflow = computed(
+    () => this.workflows().find((workflow) => workflow.key === 'cajasMassEmail') ?? null,
   );
   protected readonly loading = signal(true);
   protected readonly running = signal<WorkflowKey | null>(null);
@@ -406,6 +410,18 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
+  protected async sendMassEmail(): Promise<void> {
+    const workflow = this.massEmailWorkflow();
+    if (this.emailPanelMode() !== 'masivo' || !workflow) return;
+    if (!this.emailConfigured()) {
+      this.error.set('Guarda primero la configuración del envío masivo.');
+      return;
+    }
+
+    this.emailPanelOpen.set(false);
+    await this.execute(workflow);
+  }
+
   protected onLogoSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -501,7 +517,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   private confirmProtectedExecution(workflow: WorkflowStatus): boolean {
-    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq', 'cajas', 'facturasKomet', 'wholesaleGenerarOrden', 'wholesaleGenerarPassingSheet'] as WorkflowKey[]).includes(workflow.key)) {
+    if (!(['pegarData', 'inventario', 'reunion', 'dataProy', 'ainventario', 'dataReq', 'cajas', 'cajasMassEmail', 'facturasKomet', 'wholesaleGenerarOrden', 'wholesaleGenerarPassingSheet'] as WorkflowKey[]).includes(workflow.key)) {
       return true;
     }
 

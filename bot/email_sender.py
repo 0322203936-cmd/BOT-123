@@ -110,19 +110,22 @@ def _clean_recipients(value: object, field: str) -> list[str]:
     return recipients
 
 
-def load_email_config(raw_config: str | None) -> dict | None:
+def load_email_config(
+    raw_config: str | None,
+    variable_name: str = "CAJAS_EMAIL_CONFIG",
+) -> dict | None:
     if not raw_config or not raw_config.strip():
         return None
     try:
         value = json.loads(raw_config)
     except json.JSONDecodeError as exc:
-        raise EmailConfigError("CAJAS_EMAIL_CONFIG no contiene un JSON válido.") from exc
+        raise EmailConfigError(f"{variable_name} no contiene un JSON válido.") from exc
     if not isinstance(value, dict):
-        raise EmailConfigError("CAJAS_EMAIL_CONFIG debe ser un objeto JSON.")
+        raise EmailConfigError(f"{variable_name} debe ser un objeto JSON.")
 
     recipients = _clean_recipients(value.get("recipients"), "recipients")
     if not recipients:
-        raise EmailConfigError("CAJAS_EMAIL_CONFIG debe tener al menos un destinatario.")
+        raise EmailConfigError(f"{variable_name} debe tener al menos un destinatario.")
     cc = _clean_recipients(value.get("cc", []), "cc")
     bcc = _clean_recipients(value.get("bcc", []), "bcc")
     subject = value.get("subject")
@@ -284,6 +287,41 @@ def build_direct_send_payload(
         raise EmailConfigError(
             "El correo con el Excel y el logo supera el límite para enviarlo solo con "
             "Mail.Send. Reduce el tamaño del logo o habilita Mail.ReadWrite."
+        )
+    return payload
+
+
+def build_mass_send_payload(
+    config: dict,
+    sharepoint_logo_path: Path | None,
+    sharepoint_pdf_path: Path | None,
+) -> dict:
+    message = build_graph_message(config)
+    attachments: list[dict] = []
+    if sharepoint_logo_path:
+        attachments.append(
+            build_file_attachment(
+                sharepoint_logo_path,
+                content_id=INLINE_LOGO_CONTENT_ID,
+                content_type=config["logoSharePoint"]["contentType"],
+            )
+        )
+    else:
+        inline_logo = build_inline_logo_attachment(config)
+        if inline_logo:
+            attachments.append(inline_logo)
+    if sharepoint_pdf_path:
+        attachments.append(
+            build_file_attachment(sharepoint_pdf_path, content_type="application/pdf")
+        )
+    if attachments:
+        message["attachments"] = attachments
+    payload = {"message": message, "saveToSentItems": True}
+    payload_size = len(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
+    if payload_size > DIRECT_SEND_PAYLOAD_LIMIT:
+        raise EmailConfigError(
+            "El correo masivo con el logo y el PDF supera el límite de envío. "
+            "Reduce el tamaño de los adjuntos."
         )
     return payload
 
@@ -539,6 +577,49 @@ def send_report_email(
             )
             _raise_for_graph(response, f"enviar el correo a {recipient}")
         print(f"Correo enviado con {attachment_path.name} a {len(config['recipients'])} destinatario(s).", flush=True)
+    finally:
+        if sharepoint_logo_path:
+            sharepoint_logo_path.unlink(missing_ok=True)
+        if sharepoint_pdf_path:
+            sharepoint_pdf_path.unlink(missing_ok=True)
+
+
+def send_mass_announcement_email(
+    config: dict,
+    sender: str,
+    token: str | None = None,
+) -> None:
+    if not sender.strip():
+        raise RuntimeError("Falta configurar el secreto MAIL_SENDER.")
+
+    graph_access_token = token or graph_token()
+    clean_sender = sender.strip()
+    sharepoint_logo_path = _download_sharepoint_logo(graph_access_token, config)
+    sharepoint_pdf_path = _download_sharepoint_pdf(graph_access_token, config)
+    try:
+        for index, recipient in enumerate(config["recipients"]):
+            recipient_config = {
+                **config,
+                "recipients": [recipient],
+                "cc": config["cc"] if index == 0 else [],
+                "bcc": config["bcc"] if index == 0 else [],
+            }
+            payload = build_mass_send_payload(
+                recipient_config,
+                sharepoint_logo_path,
+                sharepoint_pdf_path,
+            )
+            response = requests.post(
+                _user_path(clean_sender, "sendMail"),
+                headers={**graph_headers(graph_access_token), "Content-Type": "application/json"},
+                json=payload,
+                timeout=120,
+            )
+            _raise_for_graph(response, f"enviar el correo masivo a {recipient}")
+        print(
+            f"Publicación masiva enviada a {len(config['recipients'])} destinatario(s).",
+            flush=True,
+        )
     finally:
         if sharepoint_logo_path:
             sharepoint_logo_path.unlink(missing_ok=True)

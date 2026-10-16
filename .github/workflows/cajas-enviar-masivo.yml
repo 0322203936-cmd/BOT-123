@@ -1,0 +1,38 @@
+name: Cajas - Enviar publicación masiva
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cajas-enviar-masivo
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  enviar-publicacion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r bot/requirements.txt
+
+      - name: Enviar publicación masiva
+        env:
+          SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
+          SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
+          SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
+          CAJAS_MASS_EMAIL_CONFIG: ${{ vars.CAJAS_MASS_EMAIL_CONFIG }}
+        run: python -u bot/send_mass_announcement.py

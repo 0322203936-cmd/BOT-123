@@ -366,6 +366,16 @@
               </label>
               <div class="panel-actions">
                 <button class="secondary-button" type="button" [disabled]="emailSaving()" (click)="closeEmailPanel()">Cancelar</button>
+                @if (emailPanelMode() === 'masivo') {
+                  <button
+                    class="mass-send-button"
+                    type="button"
+                    [disabled]="emailSaving() || !emailConfigured() || !massEmailWorkflow()"
+                    (click)="sendMassEmail()"
+                  >
+                    Enviar ahora
+                  </button>
+                }
                 <button class="save-button" type="submit" [disabled]="emailSaving()">
                   @if (emailSaving()) { <span class="button-loader"></span> Guardando… } @else { Guardar configuración }
                 </button>

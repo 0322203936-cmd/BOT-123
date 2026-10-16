@@ -105,6 +105,15 @@ const workflows = {
     description: 'Vacía el inventario de Kometsales y sube el XLS actualizado desde SharePoint.',
     schedule: 'Ejecución manual',
   },
+  cajasMassEmail: {
+    owner,
+    repo: process.env.CAJAS_GITHUB_REPO || 'BOT-123',
+    branch,
+    file: 'cajas-enviar-masivo.yml',
+    name: 'Enviar masivamente',
+    description: 'Envía manualmente la publicación masiva configurada para clientes Wholesale.',
+    schedule: 'Ejecución manual',
+  },
   facturasKomet: {
     owner,
     repo: process.env.FACTURAS_KOMET_GITHUB_REPO || 'BOT-123',
@@ -746,7 +755,7 @@ async function readCajasEmailConfig(workflow, variableName = cajasEmailVariable,
       return { config: { ...fallbackConfig }, configured: false };
     }
     if (error instanceof SyntaxError) {
-      error.message = 'La variable CAJAS_EMAIL_CONFIG no contiene un JSON válido.';
+      error.message = 'La variable ' + variableName + ' no contiene un JSON válido.';
       error.status = 502;
     }
     throw error;

@@ -261,10 +261,12 @@
 .logo-upload{display:grid;gap:7px}.logo-upload input[type="file"]{height:auto;padding:9px 11px}.field-help{margin:0;color:#7a8780;font-size:11px}.logo-file-row{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#52615a;font-size:12px}.remove-logo-button{padding:4px 0;color:#a6574b;background:transparent;border:0;cursor:pointer;font-size:11px}
 .logo-preview { max-width: 180px; max-height: 70px; object-fit: contain; object-position: left center; }
 .panel-actions { display: flex; justify-content: flex-end; gap: 9px; }
-.secondary-button, .save-button { min-height: 42px; padding: 0 15px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
+.secondary-button, .save-button, .mass-send-button { min-height: 42px; padding: 0 15px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 800; }
 .secondary-button { color: #52615a; background: #f3f6f4; border: 1px solid #d7e0db; }
 .save-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; color: #fff; background: #256d80; border: 0; }
-.secondary-button:disabled, .save-button:disabled { cursor: wait; opacity: .6; }
+.mass-send-button { color: #fff; background: #b33b45; border: 0; }
+.secondary-button:disabled, .save-button:disabled, .mass-send-button:disabled { cursor: wait; opacity: .6; }
+.mass-send-button:hover:not(:disabled) { background: #8d2530; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .25; } }
@@ -283,7 +285,7 @@
   .email-panel { padding: 21px; }
   .field-grid { grid-template-columns: 1fr; }
   .panel-actions { flex-direction: column-reverse; }
-  .secondary-button, .save-button { width: 100%; }
+  .secondary-button, .save-button, .mass-send-button { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
