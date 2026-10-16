@@ -6,6 +6,7 @@ import { EditorComponent } from '@tinymce/tinymce-angular';
 import { firstValueFrom } from 'rxjs';
 
 type WorkflowKey = 'galleria' | 'cancelaciones' | 'pegarData' | 'exportar6Meses' | 'inventario' | 'reunion' | 'dataProy' | 'ainventario' | 'dataReq' | 'cajas' | 'facturasKomet' | 'wholesaleGenerarOrden' | 'wholesaleGenerarPassingSheet';
+type EmailPanelMode = 'cajas' | 'masivo';
 type RunState = 'idle' | 'queued' | 'in_progress' | 'completed' | 'unknown';
 
 interface WorkflowRun {
@@ -110,6 +111,7 @@ export class App implements OnInit, OnDestroy {
   protected readonly emailLoading = signal(false);
   protected readonly emailSaving = signal(false);
   protected readonly emailConfigured = signal(false);
+  protected readonly emailPanelMode = signal<EmailPanelMode>('cajas');
   protected readonly emailEditorInit: EditorComponent['init'] = {
     height: 280,
     menubar: false,
@@ -289,17 +291,23 @@ export class App implements OnInit, OnDestroy {
     }
   }
 
-  protected async openEmailPanel(workflow: WorkflowStatus): Promise<void> {
+  protected async openEmailPanel(workflow: WorkflowStatus, mode: EmailPanelMode = 'cajas'): Promise<void> {
     if (workflow.key !== 'cajas' || this.emailLoading()) return;
 
+    this.emailPanelMode.set(mode);
     this.emailPanelOpen.set(true);
     this.emailLoading.set(true);
     this.error.set('');
     try {
       const response = await firstValueFrom(
-        this.http.get<CajasEmailConfigResponse>('/api/workflows/cajas/email-config', {
+        this.http.get<CajasEmailConfigResponse>(
+          mode === 'masivo'
+            ? '/api/workflows/cajas/mass-email-config'
+            : '/api/workflows/cajas/email-config',
+          {
           headers: this.authHeaders(),
-        }),
+          },
+        ),
       );
       this.setEmailConfig(response.config);
       this.emailConfigured.set(response.configured);
@@ -353,7 +361,9 @@ export class App implements OnInit, OnDestroy {
       const clearLogo = this.emailLogoCleared && !logoFile;
       const response = await firstValueFrom(
         this.http.put<{ config: CajasEmailConfig; message: string }>(
-          '/api/workflows/cajas/email-config',
+          this.emailPanelMode() === 'masivo'
+            ? '/api/workflows/cajas/mass-email-config'
+            : '/api/workflows/cajas/email-config',
           {
             recipients,
             cc: this.parseEmailList(this.emailCc),

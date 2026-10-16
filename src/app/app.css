@@ -101,6 +101,8 @@
 .email-button:hover:not(:disabled) { color: #174e5b; background: #dceff2; }
 .email-button:disabled { cursor: wait; opacity: .55; }
 .email-button svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.mass-email-button { color: #b33b45; background: #fff0f1; border-color: #f0c7ca; }
+.mass-email-button:hover:not(:disabled) { color: #8d2530; background: #ffe0e3; }
 
 .status {
   display: inline-flex;

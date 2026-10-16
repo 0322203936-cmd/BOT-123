@@ -74,6 +74,16 @@
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM4 7l8 6 8-6" /></svg>
                 </button>
+                <button
+                  class="email-button mass-email-button"
+                  type="button"
+                  aria-label="Enviar masivamente"
+                  title="Enviar masivamente"
+                  [disabled]="emailLoading()"
+                  (click)="openEmailPanel(workflow, 'masivo')"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM4 7l8 6 8-6" /></svg>
+                </button>
               }
               <span class="status" [ngClass]="statusClass(workflow.run)">
                 <i></i>{{ statusLabel(workflow.run) }}
@@ -284,6 +294,10 @@
         <section class="email-panel" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
           <div class="panel-heading">
             <div>
+              <h2>{{ emailPanelMode() === 'masivo' ? 'Enviar masivamente' : 'Configurar correo de Cajas' }}</h2>
+              @if (emailPanelMode() === 'masivo') {
+                <p class="panel-note">Esta configuración queda separada y no se ejecuta al correr Subir XLS Cajas.</p>
+              }
             </div>
             <button class="close-button" type="button" aria-label="Cerrar" (click)="closeEmailPanel()">×</button>
           </div>

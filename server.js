@@ -136,6 +136,7 @@ const workflows = {
 
 const lastDispatch = new Map();
 const cajasEmailVariable = 'CAJAS_EMAIL_CONFIG';
+const cajasMassEmailVariable = 'CAJAS_MASS_EMAIL_CONFIG';
 const graphUrl = 'https://graph.microsoft.com/v1.0';
 const cajasSharePointUrl = process.env.CAJAS_SHAREPOINT_URL || 'https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7B432E0F6F-229A-4635-A25A-A049DC537883%7D&file=Inventory%20Upload%20Boxes%2009092026.xlsx&action=default&mobileredirect=true';
 const maxInlineLogoBytes = 24 * 1024;
@@ -159,6 +160,19 @@ const defaultCajasEmailConfig = {
   logoName: '',
   logoContentType: '',
   logoSharePoint: null,
+};
+const defaultCajasMassEmailConfig = {
+  recipients: [],
+  cc: [],
+  bcc: [],
+  subject: 'Aviso importante para clientes Wholesale',
+  bodyHtml: '<p>Good day,</p><p>Sunday morning our farm got hit by Tropical Storm Rachel. We have regained power and communications are back up.</p><p>We are aiming to resume shipping by Monday.</p><p>Thank you,</p><p>Roberto</p>',
+  logoUrl: '',
+  logoData: '',
+  logoName: '',
+  logoContentType: '',
+  logoSharePoint: null,
+  pdfSharePoint: null,
 };
 
 const reportMatchers = {
@@ -720,16 +734,16 @@ function normalizeCajasEmailConfig(value) {
   return config;
 }
 
-async function readCajasEmailConfig(workflow) {
+async function readCajasEmailConfig(workflow, variableName = cajasEmailVariable, fallbackConfig = defaultCajasEmailConfig) {
   try {
     const variable = await githubRequest(
-      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/variables/${encodeURIComponent(cajasEmailVariable)}`,
+      `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/variables/${encodeURIComponent(variableName)}`,
     );
     const config = normalizeCajasEmailConfig(JSON.parse(variable.value));
     return { config, configured: true };
   } catch (error) {
     if (error.status === 404) {
-      return { config: { ...defaultCajasEmailConfig }, configured: false };
+      return { config: { ...fallbackConfig }, configured: false };
     }
     if (error instanceof SyntaxError) {
       error.message = 'La variable CAJAS_EMAIL_CONFIG no contiene un JSON válido.';
@@ -737,6 +751,27 @@ async function readCajasEmailConfig(workflow) {
     }
     throw error;
   }
+}
+
+async function writeCajasEmailConfig(workflow, variableName, value) {
+  const config = normalizeCajasEmailConfig(value);
+  const variablePath = `/repos/${encodeURIComponent(workflow.owner)}/${encodeURIComponent(workflow.repo)}/actions/variables`;
+  const variableBody = JSON.stringify({ name: variableName, value: JSON.stringify(config) });
+  try {
+    await githubRequest(`${variablePath}/${encodeURIComponent(variableName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: variableBody,
+    });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    await githubRequest(variablePath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: variableBody,
+    });
+  }
+  return config;
 }
 
 function findReportEntry(entries, matchers) {
@@ -881,6 +916,15 @@ app.get('/api/workflows/cajas/email-config', authenticate, async (_req, res, nex
   }
 });
 
+app.get('/api/workflows/cajas/mass-email-config', authenticate, async (_req, res, next) => {
+  try {
+    const config = await readCajasEmailConfig(workflows.cajas, cajasMassEmailVariable, defaultCajasMassEmailConfig);
+    res.json(config);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/workflows/cajas/email-logo', requireWriteAuthentication, async (req, res, next) => {
   try {
     const contentType = (req.get('Content-Type') || '').split(';', 1)[0].trim().toLowerCase();
@@ -918,24 +962,17 @@ app.delete('/api/workflows/cajas/email-pdf', requireWriteAuthentication, async (
 
 app.put('/api/workflows/cajas/email-config', requireWriteAuthentication, async (req, res, next) => {
   try {
-    const config = normalizeCajasEmailConfig(req.body);
-    const variablePath = `/repos/${encodeURIComponent(workflows.cajas.owner)}/${encodeURIComponent(workflows.cajas.repo)}/actions/variables`;
-    const variableBody = JSON.stringify({ name: cajasEmailVariable, value: JSON.stringify(config) });
-    try {
-      await githubRequest(`${variablePath}/${encodeURIComponent(cajasEmailVariable)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: variableBody,
-      });
-    } catch (error) {
-      if (error.status !== 404) throw error;
-      await githubRequest(variablePath, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: variableBody,
-      });
-    }
+    const config = await writeCajasEmailConfig(workflows.cajas, cajasEmailVariable, req.body);
     res.json({ config, message: 'Configuración del correo de Cajas guardada.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/workflows/cajas/mass-email-config', requireWriteAuthentication, async (req, res, next) => {
+  try {
+    const config = await writeCajasEmailConfig(workflows.cajas, cajasMassEmailVariable, req.body);
+    res.json({ config, message: 'Configuración de envío masivo guardada. No se enviará al ejecutar Subir XLS Cajas.' });
   } catch (error) {
     next(error);
   }
