@@ -126,10 +126,10 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_september_window(page: Page) -> tuple[date, date]:
-    """Filter POSCO orders from August 15 through September 15 of the current year."""
+def set_load_date_july_window(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from July 15 through August 15 of the current year."""
     today = datetime.now(BOT_TIMEZONE).date()
-    end_date = date(today.year, 9, 15)
+    end_date = date(today.year, 8, 15)
     start_date = add_calendar_months(end_date, -1)
     menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
@@ -150,7 +150,7 @@ def set_load_date_september_window(page: Page) -> tuple[date, date]:
     mayor.press("Tab")
     print(
         f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={end_date.isoformat()} "
-        f"(del 15 de agosto al 15 de septiembre del año actual).",
+        f"(del 15 de julio al 15 de agosto del año actual).",
         flush=True,
     )
     return start_date, end_date
@@ -229,9 +229,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Filtrando Load Date del 15 de agosto al 15 de septiembre...", flush=True)
-            start_date, end_date = set_load_date_september_window(page)
-            capture(page, "05_rango_15_agosto_a_15_septiembre.png")
+            print("Filtrando Load Date del 15 de julio al 15 de agosto...", flush=True)
+            start_date, end_date = set_load_date_july_window(page)
+            capture(page, "05_rango_15_julio_a_15_agosto.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
@@ -250,7 +250,7 @@ def run() -> None:
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
             print(
-                f"EXPORTAR_SEPTIEMBRE_OK load_date_menor={start_date.isoformat()} "
+                f"EXPORTAR_JULIO_OK load_date_menor={start_date.isoformat()} "
                 f"load_date_mayor={end_date.isoformat()} reporte={report}",
                 flush=True,
             )
