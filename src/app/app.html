@@ -33,9 +33,6 @@
 
     <section class="hero">
       <h1>{{ activeSection() === 'wholesale' ? 'Atajos Wholesale' : 'Atajos Centro Floricultor' }}</h1>
-      @if (activeSection() === 'wholesale') {
-        <p class="section-description">Aquí agregaremos los botones y automatizaciones de Wholesale.</p>
-      }
     </section>
 
     @if (activeSection() === 'centro' && !configured()) {
