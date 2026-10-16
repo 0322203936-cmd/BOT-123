@@ -1,4 +1,4 @@
-name: Exportar 2 Meses
+name: Exportar 1 Mes
 
 on:
   workflow_dispatch:
