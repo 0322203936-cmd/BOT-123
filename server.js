@@ -318,6 +318,7 @@ async function githubRequest(endpoint, options = {}) {
       detail = body.message ? ` ${body.message}` : '';
     } catch {}
     const error = new Error(`GitHub rechazó la solicitud (${response.status}).${detail}`);
+    error.githubStatus = response.status;
     error.status = response.status === 401 || response.status === 403 ? 502 : response.status;
     throw error;
   }
@@ -1033,7 +1034,16 @@ app.get('/api/workflows', authenticate, async (_req, res, next) => {
     // that temporary condition into an empty panel: the workflow catalog is
     // local and the bots still exist. Dispatches continue to surface a clear
     // error until GitHub accepts requests again.
-    if (/api rate limit exceeded/i.test(error.message || '')) {
+    // A 401/403 from GitHub includes rate limits, secondary limits, expired
+    // credentials and temporary policy checks.  The catalog itself is local,
+    // so retain every button instead of rendering an empty dashboard while
+    // GitHub declines a status request.  Dispatch still reports the real
+    // GitHub error and never alters a workflow on its own.
+    if (
+      error?.githubStatus === 401
+      || error?.githubStatus === 403
+      || /rate limit/i.test(error.message || '')
+    ) {
       const fallback = workflowCache || {
         workflows: Object.entries(workflows).map(([key, workflow]) => ({
           key,
