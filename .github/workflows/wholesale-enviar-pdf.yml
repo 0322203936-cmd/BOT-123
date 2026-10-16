@@ -39,12 +39,14 @@ jobs:
           path: artifacts/wholesale_email
           merge-multiple: true
 
-      - name: Enviar PDF a Jesús
+      - name: Enviar PDF a destinatarios Wholesale
         env:
           SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
           MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
           WHOLESALE_PDF_ARTIFACT_DIR: artifacts/wholesale_email
-          WHOLESALE_PDF_RECIPIENT: jesus.sandoval@cfbc.co
+          # Formato: Nombre|correo; otro nombre|otro-correo
+          # Si solo colocas un correo, el saludo se crea desde ese correo.
+          WHOLESALE_PDF_RECIPIENTS: ${{ vars.WHOLESALE_PDF_RECIPIENTS || 'Jesús|jesus.sandoval@cfbc.co' }}
         run: python -u bot/send_wholesale_pdf_email.py
