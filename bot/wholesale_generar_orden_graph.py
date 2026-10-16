@@ -33,6 +33,8 @@ from zipfile import ZipFile
 import requests
 from openpyxl import load_workbook
 
+from wholesale_posco_format import generate_posco_from_po_new
+
 from sharepoint_sync import (
     GRAPH_URL,
     graph_headers,
@@ -594,6 +596,15 @@ def main() -> None:
                 **order_metadata,
                 "document_kind": document_kind,
             }
+            if TARGET_SHEET == "PO Nuevo":
+                posco_filename = (
+                    f"POSCO Wholesale - {re.sub(r'[^A-Za-z0-9._ -]+', ' ', order_metadata['customer']).strip() or 'Cliente'} "
+                    f"- {re.sub(r'[^A-Za-z0-9._ -]+', ' ', str(order_metadata.get('load_date', 'Sin fecha'))).strip()}.xlsx"
+                )
+                posco_path = ARTIFACT_DIR / posco_filename
+                posco_result = generate_posco_from_po_new(source, posco_path)
+                summary["posco_format"] = posco_result
+                summary["order_email"]["boom_pending"] = posco_result["boom_pending"]
             summary["preparation"] = {
                 "sheet": TARGET_SHEET,
                 "print_area": PRINT_AREA,

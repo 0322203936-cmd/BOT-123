@@ -29,7 +29,21 @@ def find_pdf(directory: Path) -> Path:
     return candidates[0]
 
 
-def load_order_metadata(directory: Path) -> dict[str, str]:
+def find_posco_workbook(directory: Path) -> Path:
+    candidates = sorted(
+        path
+        for path in directory.rglob("*.xlsx")
+        if path.is_file() and path.name.startswith("POSCO Wholesale - ")
+    )
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "Se esperaba exactamente un formato POSCO de Wholesale, "
+            f"pero se encontraron {len(candidates)}."
+        )
+    return candidates[0]
+
+
+def load_order_metadata(directory: Path) -> dict[str, object]:
     candidates = sorted(path for path in directory.rglob("summary.json") if path.is_file())
     if len(candidates) != 1:
         raise RuntimeError(
@@ -46,10 +60,14 @@ def load_order_metadata(directory: Path) -> dict[str, str]:
         raise RuntimeError("El resumen del PDF no contiene los datos del cliente.") from error
     if not customer or not load_date or not document_kind:
         raise RuntimeError("El resumen del PDF tiene datos incompletos del cliente.")
+    boom_pending = metadata.get("boom_pending", [])
+    if not isinstance(boom_pending, list):
+        raise RuntimeError("El resumen del PDF contiene pendientes BOOM inválidos.")
     return {
         "customer": customer,
         "load_date": load_date,
         "document_kind": document_kind,
+        "boom_pending": boom_pending,
     }
 
 
@@ -108,9 +126,29 @@ def main() -> None:
     attachment_path = pdf_path.with_name(safe_attachment_name(document_kind, customer))
     pdf_path.replace(attachment_path)
     safe_load_date = html.escape(load_date)
+    additional_attachments: list[Path] = []
     if document_kind == "Orden":
         subject = f"Orden Wholesale - {customer}"
-        message = f"<p>Adjunto Orden generada - Load Date: {safe_load_date}.</p>"
+        posco_workbook = find_posco_workbook(artifact_directory)
+        additional_attachments.append(posco_workbook)
+        message = f"<p>Adjunto Orden generada y formato POSCO - Load Date: {safe_load_date}.</p>"
+        pending_items: list[str] = []
+        for item in metadata["boom_pending"]:
+            if not isinstance(item, dict):
+                continue
+            product = html.escape(str(item.get("product", "")).strip())
+            recommendation = html.escape(str(item.get("recommendation", "")).strip())
+            if product and recommendation:
+                pending_items.append(
+                    f"<li><strong>{product}</strong><br>Nombre recomendado: {recommendation}</li>"
+                )
+        if pending_items:
+            message += (
+                "<p><strong style=\"color:#b91c1c\">PENDIENTE DE BOOM</strong></p>"
+                "<p>Se requiere crear el BOOM para:</p><ul>"
+                + "".join(pending_items)
+                + "</ul>"
+            )
     else:
         subject = f"Passing Sheet Wholesale - {customer}"
         message = f"<p>Adjunto Passing Sheet generado - Load Date: {safe_load_date}.</p>"
@@ -132,8 +170,17 @@ def main() -> None:
             "logoSharePoint": None,
             "pdfSharePoint": None,
         }
-        send_report_email(config, sender, attachment_path, token=token)
-        print(f"PDF Wholesale enviado a {recipient}: {attachment_path.name}", flush=True)
+        send_report_email(
+            config,
+            sender,
+            attachment_path,
+            token=token,
+            additional_attachments=additional_attachments,
+        )
+        print(
+            f"PDF Wholesale enviado a {recipient}: {attachment_path.name}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

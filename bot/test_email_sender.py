@@ -15,6 +15,27 @@ from email_sender import (
 
 
 class EmailSenderTests(unittest.TestCase):
+    def test_includes_additional_attachment_with_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "order.pdf"
+            posco = Path(directory) / "posco.xlsx"
+            report.write_bytes(b"pdf")
+            posco.write_bytes(b"xlsx")
+            payload = build_direct_send_payload(
+                {
+                    "recipients": ["destino@example.com"], "cc": [], "bcc": [],
+                    "subject": "Reporte", "bodyHtml": "<p>Listo</p>",
+                    "logoData": "", "logoSharePoint": None, "logoUrl": "",
+                },
+                report,
+                None,
+                [posco],
+            )
+        self.assertEqual(
+            [item["name"] for item in payload["message"]["attachments"]],
+            ["order.pdf", "posco.xlsx"],
+        )
+
     def test_includes_sharepoint_pdf_with_report_attachment(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "inventory.xlsx"

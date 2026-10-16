@@ -262,6 +262,7 @@ def build_direct_send_payload(
     config: dict,
     attachment_path: Path,
     sharepoint_logo_path: Path | None,
+    additional_attachments: list[Path] | None = None,
 ) -> dict:
     message = build_graph_message(config)
     attachments: list[dict] = []
@@ -278,6 +279,8 @@ def build_direct_send_payload(
         if inline_logo:
             attachments.append(inline_logo)
     attachments.append(build_file_attachment(attachment_path))
+    for additional_attachment in additional_attachments or []:
+        attachments.append(build_file_attachment(additional_attachment))
     if config.get("pdfSharePointPath"):
         attachments.append(build_file_attachment(config["pdfSharePointPath"], content_type="application/pdf"))
     message["attachments"] = attachments
@@ -546,6 +549,7 @@ def send_report_email(
     sender: str,
     attachment_path: Path,
     token: str | None = None,
+    additional_attachments: list[Path] | None = None,
 ) -> None:
     if not sender.strip():
         raise RuntimeError("Falta configurar el secreto MAIL_SENDER.")
@@ -554,6 +558,14 @@ def send_report_email(
     attachment_size = attachment_path.stat().st_size
     if attachment_size > MAX_ATTACHMENT_SIZE:
         raise RuntimeError("El XLS supera el límite de 150 MB permitido por Graph.")
+    extra_attachments = additional_attachments or []
+    for additional_attachment in extra_attachments:
+        if not additional_attachment.is_file():
+            raise RuntimeError(f"No se encontró el archivo adicional para adjuntar: {additional_attachment}.")
+        if additional_attachment.stat().st_size > MAX_ATTACHMENT_SIZE:
+            raise RuntimeError(
+                f"El archivo adicional {additional_attachment.name} supera el límite de 150 MB permitido por Graph."
+            )
 
     graph_access_token = token or graph_token()
     clean_sender = sender.strip()
@@ -568,7 +580,12 @@ def send_report_email(
                 "bcc": config["bcc"] if index == 0 else [],
                 "pdfSharePointPath": sharepoint_pdf_path,
             }
-            payload = build_direct_send_payload(recipient_config, attachment_path, sharepoint_logo_path)
+            payload = build_direct_send_payload(
+                recipient_config,
+                attachment_path,
+                sharepoint_logo_path,
+                extra_attachments,
+            )
             response = requests.post(
                 _user_path(clean_sender, "sendMail"),
                 headers={**graph_headers(graph_access_token), "Content-Type": "application/json"},
