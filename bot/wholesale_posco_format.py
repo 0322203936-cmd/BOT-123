@@ -44,6 +44,12 @@ def normalize_description(value: object) -> str:
     return text.strip()
 
 
+def is_boom_pending(value: object) -> bool:
+    """The PO Nuevo status column is the sole source of BOOM pending alerts."""
+    status = clean(value).casefold()
+    return status in {"pendiente de boom", "pendiente de bom"}
+
+
 def as_date(value: object, label: str) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -166,6 +172,7 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
             stems = required_positive_int(stems_input, f"STEM/BCH de la fila {row_number}")
             bunches = required_positive_int(bunches_input, f"BU/BOX de la fila {row_number}")
             product = _select_product(products, description_input, color_input, box_input)
+            pending_boom = is_boom_pending(order_sheet.cell(row_number, 10).value)
 
             if product:
                 description = product["descripcion"]
@@ -179,6 +186,7 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
                 flower = description_input
                 color = color_input
                 box = box_input
+            if pending_boom:
                 boom_pending.append(
                     {
                         "product": description_input,
