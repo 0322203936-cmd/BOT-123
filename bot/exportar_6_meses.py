@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
+from wholesale_products_sync import sync_wholesale_products
+
 
 POSCO_URL = "http://3.132.9.174/Posco/"
 ARTIFACTS_DIR = Path("artifacts/exportar_6_meses")
@@ -249,6 +251,8 @@ def run() -> None:
             print("Exportando Exportar Color filtro...", flush=True)
             report = export_color_filter(page)
             capture(page, "09_exportacion_completada.png")
+            print("Sincronizando productos nuevos de WHOLESALE en SharePoint...", flush=True)
+            sync_wholesale_products(report)
             print(
                 f"EXPORTAR_ULTIMO_MES_OK load_date_menor={start_date.isoformat()} "
                 f"load_date_mayor={end_date.isoformat()} reporte={report}",
