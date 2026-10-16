@@ -80,6 +80,15 @@ def request_graph(
                 detail = response.json().get("error", {}).get("message", "")
             except ValueError:
                 detail = response.text[:500]
+            if not detail:
+                diagnostics = [
+                    f"url={response.url}",
+                    f"x-errorcode={response.headers.get('x-errorcode', '')}",
+                    f"x-correlationid={response.headers.get('x-correlationid', '')}",
+                ]
+                detail = "; ".join(
+                    value for value in diagnostics if not value.endswith("=")
+                )
             raise RuntimeError(f"Microsoft Graph respondió {response.status_code}: {detail}")
         return response
     raise RuntimeError("Microsoft Graph no respondió después de los reintentos.")
@@ -247,13 +256,47 @@ def prepare_pdf_copy(source: Path, destination: Path) -> dict[str, object]:
     }
 
 
-def upload_temporary_workbook(token: str, item: dict, workbook_path: Path) -> dict:
+def prepare_pdf_xlsx_copy(source: Path, destination: Path) -> None:
+    """Create a macro-free temporary copy for Office's PDF converter.
+
+    The source remains an XLSM and is never overwritten. This fallback is only
+    used when the Office conversion service cannot open the macro-enabled
+    temporary copy; removing VBA avoids conversion failures caused by a
+    workbook's macro package while preserving all worksheet data and layout.
+    """
+    vba_relationship = re.compile(
+        rb'<Relationship\b(?=[^>]*\bType="[^"]*/vbaProject(?:"|/))[^>]*/>'
+    )
+    vba_content_type = re.compile(
+        rb'<Override\b(?=[^>]*\bPartName="/xl/vbaProject\.bin")[^>]*/>'
+    )
+    with ZipFile(source, "r") as source_zip, ZipFile(
+        destination, "w"
+    ) as destination_zip:
+        for info in source_zip.infolist():
+            if info.filename == "xl/vbaProject.bin":
+                continue
+            content = source_zip.read(info.filename)
+            if info.filename == "[Content_Types].xml":
+                content = content.replace(
+                    b"application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                    b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                )
+                content = vba_content_type.sub(b"", content)
+            elif info.filename == "xl/_rels/workbook.xml.rels":
+                content = vba_relationship.sub(b"", content)
+            destination_zip.writestr(info, content)
+
+
+def upload_temporary_workbook(
+    token: str, item: dict, workbook_path: Path, *, extension: str = ".xlsm"
+) -> dict:
     drive_id = item["parentReference"]["driveId"]
     parent_id = item["parentReference"]["id"]
     # Keep the temporary item out of the normal workbook view, but do not use
     # a dot-prefixed filename. Graph's Excel conversion service can reject
     # hidden drive items with HTTP 406 even though the upload itself succeeds.
-    filename = f"codex-generar-orden-{uuid4().hex}.xlsm"
+    filename = f"codex-generar-orden-{uuid4().hex}{extension}"
     upload_url = (
         f"{GRAPH_URL}/drives/{drive_id}/items/{parent_id}:/{quote(filename, safe='')}:/content"
     )
@@ -328,7 +371,7 @@ def main() -> None:
         "workbook": os.environ.get("SHAREPOINT_WORKBOOK_URL", DEFAULT_WORKBOOK_URL),
         "status": "error",
     }
-    temporary_item: dict | None = None
+    temporary_items: list[dict] = []
 
     try:
         token = graph_token()
@@ -342,9 +385,28 @@ def main() -> None:
             summary["preparation"] = prepare_pdf_copy(source, prepared)
 
             temporary_item = upload_temporary_workbook(token, item, prepared)
+            temporary_items.append(temporary_item)
             summary["temporary_sharepoint_item"] = temporary_item.get("name")
             pdf_path = ARTIFACT_DIR / PDF_FILENAME
-            convert_to_pdf(token, temporary_item, pdf_path)
+            try:
+                convert_to_pdf(token, temporary_item, pdf_path)
+            except RuntimeError as conversion_error:
+                if "respondió 406" not in str(conversion_error):
+                    raise
+                print(
+                    "Graph no pudo abrir la copia XLSM; preparando una copia XLSX "
+                    "sin VBA para la conversión...",
+                    flush=True,
+                )
+                prepared_xlsx = Path(temp_dir) / "prepared-for-pdf.xlsx"
+                prepare_pdf_xlsx_copy(prepared, prepared_xlsx)
+                xlsx_item = upload_temporary_workbook(
+                    token, item, prepared_xlsx, extension=".xlsx"
+                )
+                temporary_items.append(xlsx_item)
+                summary["temporary_sharepoint_fallback_item"] = xlsx_item.get("name")
+                convert_to_pdf(token, xlsx_item, pdf_path)
+                summary["pdf_fallback"] = "macro-free XLSX temporary copy"
             summary.update(
                 {
                     "status": "completed",
@@ -360,13 +422,20 @@ def main() -> None:
         )
         raise
     finally:
-        if temporary_item:
+        cleanup_errors: list[str] = []
+        for temporary_item in reversed(temporary_items):
             try:
                 delete_temporary_workbook(token, temporary_item)
-                summary["temporary_sharepoint_item_deleted"] = True
             except Exception as cleanup_error:
-                summary["temporary_sharepoint_item_deleted"] = False
-                summary["cleanup_error"] = str(cleanup_error)
+                cleanup_errors.append(str(cleanup_error))
+        summary["temporary_sharepoint_items_deleted"] = len(temporary_items) - len(
+            cleanup_errors
+        )
+        if cleanup_errors:
+            summary["temporary_sharepoint_item_deleted"] = False
+            summary["cleanup_error"] = " | ".join(cleanup_errors)
+        elif temporary_items:
+            summary["temporary_sharepoint_item_deleted"] = True
         (ARTIFACT_DIR / "summary.json").write_text(
             json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
         )
