@@ -96,6 +96,7 @@ export class App implements OnInit, OnDestroy {
   protected readonly visibleWorkflows = computed(() =>
     this.workflows().filter(
       (workflow) => workflow.key !== 'cancelaciones'
+        && workflow.key !== 'exportar6Meses'
         && workflow.key !== 'wholesaleGenerarOrden'
         && workflow.key !== 'wholesaleGenerarPassingSheet'
         && workflow.key !== 'cajasMassEmail',
@@ -103,6 +104,9 @@ export class App implements OnInit, OnDestroy {
   );
   protected readonly wholesaleWorkflow = computed(
     () => this.workflows().find((workflow) => workflow.key === 'wholesaleGenerarOrden') ?? null,
+  );
+  protected readonly wholesaleExportarUltimoMesWorkflow = computed(
+    () => this.workflows().find((workflow) => workflow.key === 'exportar6Meses') ?? null,
   );
   protected readonly wholesalePassingSheetWorkflow = computed(
     () => this.workflows().find((workflow) => workflow.key === 'wholesaleGenerarPassingSheet') ?? null,
