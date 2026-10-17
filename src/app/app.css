@@ -14,6 +14,14 @@
 .workflow-grid[hidden] { display: none; }
 .wholesale-grid { margin-top: 28px; }
 .wholesale-card { max-width: 430px; }
+.wholesale-card::before { background: linear-gradient(90deg, #256d80, #45a1b5); }
+.wholesale-card .bot-icon { background: linear-gradient(145deg, #357f92, #256d80); box-shadow: 0 7px 16px rgba(37, 109, 128, .2); }
+.wholesale-card .run-button { background: linear-gradient(135deg, #357f92, #256d80); }
+.wholesale-card .run-button:hover:not(:disabled) { background: #1c5967; }
+.wholesale-card .download-button { color: #256d80; background: #edf7f8; border-color: #c9e2e6; }
+.wholesale-card .download-button:hover:not(:disabled) { background: #dceff2; }
+.wholesale-card .quick-facts .elapsed-time { color: #256d80; }
+.wholesale-card .button-loader.dark { border-color: rgba(37, 109, 128, .25); border-top-color: #256d80; }
 
 .hero {
   margin: 38px 0 28px;
