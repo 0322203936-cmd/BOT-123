@@ -27,7 +27,7 @@ FIXED_DISTRIBUTOR = "PACIFICA PRODUCE FARMS"
 SHAREPOINT_PRODUCTS_URL = (
     "https://pacificafarms.sharepoint.com/:x:/r/sites/"
     "requerimientovsproyeccion/_layouts/15/Doc.aspx?"
-    "sourcedoc=%7BBE147792-3CD4-49FB-8185-63CC0D0833CC%7D&"
+    "sourcedoc=%7B7FEB8241-AC2E-4964-B671-C4FAFF942F33%7D&"
     "file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&"
     "action=default&mobileredirect=true&wdwpf=doclib-c"
 )

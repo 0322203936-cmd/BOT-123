@@ -1,4 +1,4 @@
-name: Exportar Junio
+name: Exportar Último Mes
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
           SHAREPOINT_TENANT_ID: ${{ secrets.SHAREPOINT_TENANT_ID }}
           SHAREPOINT_CLIENT_ID: ${{ secrets.SHAREPOINT_CLIENT_ID }}
           SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
-          SHAREPOINT_PRODUCTS_URL: 'https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BBE147792-3CD4-49FB-8185-63CC0D0833CC%7D&file=PEDIDO%20Suzy%20-%20Mex%20y%20Can%20USA%2008-18-2026.xlsm&action=default&mobileredirect=true&wdwpf=doclib-c'
+          SHAREPOINT_PRODUCTS_URL: ${{ secrets.SHAREPOINT_PRODUCTS_URL }}
         run: python -u bot/exportar_6_meses.py
 
       - name: Guardar capturas de la ejecución
