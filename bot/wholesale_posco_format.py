@@ -184,8 +184,10 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
             stems_input = order_sheet.cell(row_number, 4).value
             bunches_input = order_sheet.cell(row_number, 5).value
             box_input = clean(order_sheet.cell(row_number, 6).value)
+            cases_input = order_sheet.cell(row_number, 8).value
             stems = required_wholesale_quantity(stems_input, f"STEM/BCH de la fila {row_number}")
             bunches = required_wholesale_quantity(bunches_input, f"BU/BOX de la fila {row_number}")
+            cases = required_wholesale_quantity(cases_input, f"CASES de la fila {row_number}")
             product = _select_product(products, description_input, color_input, box_input)
             pending_boom = is_boom_pending(order_sheet.cell(row_number, 10).value)
 
@@ -221,7 +223,7 @@ def generate_posco_from_po_new(source: Path, destination: Path) -> dict[str, obj
                     flower,
                     color,
                     load_date,
-                    1,
+                    cases,
                     bunches,
                     stems,
                     load_date - timedelta(days=3),

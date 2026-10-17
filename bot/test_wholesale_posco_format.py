@@ -42,11 +42,13 @@ class WholesalePoscoFormatTests(unittest.TestCase):
         order["D22"] = 5
         order["E22"] = 10
         order["F22"] = "F4P"
+        order["H22"] = 2
         order["B23"] = "Manual White Product"
         order["C23"] = "WHITE"
         order["D23"] = "6ST"
         order["E23"] = "12BU"
         order["F23"] = "F4P"
+        order["H23"] = 3
         order["J23"] = "PENDIENTE DE BOOM"
         products = workbook.create_sheet("Productos")
         products.append([
@@ -83,8 +85,10 @@ class WholesalePoscoFormatTests(unittest.TestCase):
                     self.assertEqual(sheet["C2"].value, "WS MARIGOLD ASSORED 5ST PK10")
                     self.assertEqual(sheet["F2"].value, "MARIGOLD")
                     self.assertEqual(sheet["G2"].value, "ORANGE")
+                    self.assertEqual(sheet["I2"].value, 2)
                     self.assertEqual(sheet["M2"].value, "F4P")
                     self.assertEqual(sheet["F3"].value, "Manual White Product")
+                    self.assertEqual(sheet["I3"].value, 3)
                 finally:
                     workbook.close()
         finally:
