@@ -19,7 +19,8 @@ CAPTURES_DIR = Path("artifacts/capturas")
 REPORTS_DIR = Path("artifacts/reportes")
 
 REQ_PROY_URL = "https://pacificafarms.sharepoint.com/:x:/r/sites/requerimientovsproyeccion/_layouts/15/Doc.aspx?sourcedoc=%7BB6111299-1373-4717-A2B7-3D507AD77A8A%7D&file=Requerimiento%20vs%20proyeccion.xlsm&action=default&mobileredirect=true"
-DATA_REQ_CHUNK_SIZE = 1000
+DATA_REQ_CHUNK_SIZE = 100
+DATA_REQ_CHUNK_DELAY_SECONDS = 1
 EXCEL_DATE_EPOCH = datetime(1899, 12, 30)
 
 
@@ -352,6 +353,64 @@ def clean_value(value):
         return value.isoformat()
     return value
 
+
+def excel_matrix_equal(expected_rows, actual_rows) -> bool:
+    """Compare a Graph range response with the rows we intended to write."""
+    if len(expected_rows) != len(actual_rows):
+        return False
+    return all(
+        excel_rows_equal(expected_row, actual_row)
+        for expected_row, actual_row in zip(expected_rows, actual_rows)
+    )
+
+
+def read_data_req_range(session, workbook_url: str, address: str) -> list[list]:
+    response = session.request(
+        "GET",
+        f"{workbook_url}/worksheets/DataReq/range(address='{address}')",
+        timeout=120,
+    )
+    return response.json().get("values", [])
+
+
+def write_data_req_range_and_verify(
+    session,
+    workbook_url: str,
+    address: str,
+    values: list[list],
+) -> None:
+    """Write one range and verify it, including ambiguous 504 responses.
+
+    Microsoft Graph may return 504 after Excel Online accepted a write. In that
+    case the read-back determines whether the write already landed and avoids
+    blindly repeating it.
+    """
+    range_url = f"{workbook_url}/worksheets/DataReq/range(address='{address}')"
+    try:
+        session.request(
+            "PATCH",
+            range_url,
+            json={"values": values},
+            timeout=120,
+        )
+    except RuntimeError as error:
+        observed = read_data_req_range(session, workbook_url, address)
+        if excel_matrix_equal(values, observed):
+            print(
+                f"El bloque {address} respondió con error, pero quedó confirmado; "
+                "se continúa sin repetirlo.",
+                flush=True,
+            )
+            return
+        raise error
+
+    observed = read_data_req_range(session, workbook_url, address)
+    if not excel_matrix_equal(values, observed):
+        raise RuntimeError(
+            f"La verificación del bloque DataReq {address} no coincidió "
+            "con los datos enviados."
+        )
+
 def process_and_upload(report_path: Path):
     if os.environ.get("SHAREPOINT_UPLOAD", "true").lower() not in {"1", "true", "yes", "si", "sí"}:
         print("Modo prueba: SHAREPOINT_UPLOAD esta apagado.")
@@ -396,58 +455,86 @@ def process_and_upload(report_path: Path):
         match = re.search(r'!([A-Za-z]+)\d+:([A-Za-z]+)(\d+)', address)
         end_row = int(match.group(3)) if match else 1000
         
-        if end_row >= 2:
-            print(f"Limpiando datos existentes B2:R{end_row} y Z2:Z{end_row}...")
-            # Microsoft Graph clear endpoint
-            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='B2:R{end_row}')/clear",
-                            json={"applyTo": "Contents"}, timeout=120)
-            session.request("POST", f"{workbook_url}/worksheets/DataReq/range(address='Z2:Z{end_row}')/clear",
-                            json={"applyTo": "Contents"}, timeout=120)
-        
-        if len(new_data) > 0:
-            z_data = []
-            for row in new_data:
-                # El indice 13 corresponde a la columna O en nuestra proyección B..R
-                z_data.append([row[13]])
-                row[13] = ""
-            
-            for i in range(0, len(new_data), DATA_REQ_CHUNK_SIZE):
-                chunk = new_data[i : i + DATA_REQ_CHUNK_SIZE]
-                chunk_z = z_data[i : i + DATA_REQ_CHUNK_SIZE]
-                chunk_start = 2 + i
-                chunk_end = chunk_start + len(chunk) - 1
-                
-                chunk_addr = f"B{chunk_start}:R{chunk_end}"
-                print(f"Pegando chunk {chunk_addr}...")
-                session.request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr}')",
-                                json={"values": chunk}, timeout=120)
-                              
-                chunk_addr_z = f"Z{chunk_start}:Z{chunk_end}"
-                print(f"Pegando chunk {chunk_addr_z}...")
-                session.request("PATCH", f"{workbook_url}/worksheets/DataReq/range(address='{chunk_addr_z}')",
-                                json={"values": chunk_z}, timeout=120)
-                time.sleep(1)
+        if not new_data:
+            raise RuntimeError("El reporte de POSCO no contiene filas de datos; no se modificó DataReq.")
 
-            time.sleep(3)
-            last_row = len(new_data) + 1
-            last_main = session.request(
-                "GET",
-                f"{workbook_url}/worksheets/DataReq/range(address='B{last_row}:R{last_row}')",
-                timeout=120,
-            ).json().get("values", [[]])[0]
-            last_z = session.request(
-                "GET",
-                f"{workbook_url}/worksheets/DataReq/range(address='Z{last_row}:Z{last_row}')",
-                timeout=120,
-            ).json().get("values", [[]])[0]
-            if not excel_rows_equal(new_data[-1], last_main):
-                print(f"ERROR DE VERIFICACION B:R.\nEsperado (Posco): {new_data[-1]}\nObtenido (SharePoint): {last_main}", flush=True)
-                raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:R.")
-            if not excel_rows_equal(z_data[-1], last_z):
-                print(f"ERROR DE VERIFICACION Z.\nEsperado (Posco): {z_data[-1]}\nObtenido (SharePoint): {last_z}", flush=True)
-                raise RuntimeError("La verificacion final de DataReq fallo en la columna Z.")
+        z_data = []
+        main_data = []
+        for row in new_data:
+            # El indice 13 corresponde a la columna O en la proyección B..R.
+            # Se conserva en Z y se deja vacío en el bloque principal.
+            z_data.append([row[13]])
+            main_row = list(row)
+            main_row[13] = ""
+            main_data.append(main_row)
 
-            print("Datos copiados exitosamente a DataReq.")
+        print(
+            "La carga se hará sin limpiar primero; cada bloque se verificará "
+            "antes de continuar.",
+            flush=True,
+        )
+
+        for i in range(0, len(main_data), DATA_REQ_CHUNK_SIZE):
+            chunk = main_data[i : i + DATA_REQ_CHUNK_SIZE]
+            chunk_z = z_data[i : i + DATA_REQ_CHUNK_SIZE]
+            chunk_start = 2 + i
+            chunk_end = chunk_start + len(chunk) - 1
+
+            chunk_addr = f"B{chunk_start}:R{chunk_end}"
+            print(f"Pegando chunk {chunk_addr}...")
+            write_data_req_range_and_verify(
+                session, workbook_url, chunk_addr, chunk
+            )
+
+            chunk_addr_z = f"Z{chunk_start}:Z{chunk_end}"
+            print(f"Pegando chunk {chunk_addr_z}...")
+            write_data_req_range_and_verify(
+                session, workbook_url, chunk_addr_z, chunk_z
+            )
+            time.sleep(DATA_REQ_CHUNK_DELAY_SECONDS)
+
+        # Solo después de confirmar todos los bloques se limpian filas antiguas
+        # que hayan quedado por debajo del nuevo reporte.
+        new_last_row = len(main_data) + 1
+        if end_row > new_last_row:
+            clear_start = new_last_row + 1
+            print(
+                f"Limpiando únicamente filas sobrantes {clear_start}:{end_row}...",
+                flush=True,
+            )
+            session.request(
+                "POST",
+                f"{workbook_url}/worksheets/DataReq/range(address='B{clear_start}:R{end_row}')/clear",
+                json={"applyTo": "Contents"},
+                timeout=120,
+            )
+            session.request(
+                "POST",
+                f"{workbook_url}/worksheets/DataReq/range(address='Z{clear_start}:Z{end_row}')/clear",
+                json={"applyTo": "Contents"},
+                timeout=120,
+            )
+
+        time.sleep(3)
+        last_row = len(main_data) + 1
+        last_main = session.request(
+            "GET",
+            f"{workbook_url}/worksheets/DataReq/range(address='B{last_row}:R{last_row}')",
+            timeout=120,
+        ).json().get("values", [[]])[0]
+        last_z = session.request(
+            "GET",
+            f"{workbook_url}/worksheets/DataReq/range(address='Z{last_row}:Z{last_row}')",
+            timeout=120,
+        ).json().get("values", [[]])[0]
+        if not excel_rows_equal(main_data[-1], last_main):
+            print(f"ERROR DE VERIFICACION B:R.\nEsperado (Posco): {main_data[-1]}\nObtenido (SharePoint): {last_main}", flush=True)
+            raise RuntimeError("La verificacion final de DataReq fallo en las columnas B:R.")
+        if not excel_rows_equal(z_data[-1], last_z):
+            print(f"ERROR DE VERIFICACION Z.\nEsperado (Posco): {z_data[-1]}\nObtenido (SharePoint): {last_z}", flush=True)
+            raise RuntimeError("La verificacion final de DataReq fallo en la columna Z.")
+
+        print("Datos copiados exitosamente a DataReq.")
     finally:
         session.close()
 
