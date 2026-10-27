@@ -116,11 +116,21 @@ def parse_recipients(value: str) -> list[tuple[str, str]]:
 
 def main() -> None:
     artifact_directory = Path(required_value("WHOLESALE_PDF_ARTIFACT_DIR"))
-    recipients = parse_recipients(required_value("WHOLESALE_PDF_RECIPIENTS"))
     sender = required_value("MAIL_SENDER")
     pdf_path = find_pdf(artifact_directory)
     metadata = load_order_metadata(artifact_directory)
     document_kind = metadata["document_kind"]
+    recipient_variable = (
+        "WHOLESALE_PDF_RECIPIENTS"
+        if document_kind == "Orden"
+        else "WHOLESALE_PASSING_SHEET_RECIPIENTS"
+    )
+    recipient_value = os.environ.get(recipient_variable, "").strip()
+    # Keep old configurations working until the separate Passing Sheet variable
+    # is created in GitHub Actions variables.
+    if not recipient_value and recipient_variable != "WHOLESALE_PDF_RECIPIENTS":
+        recipient_value = os.environ.get("WHOLESALE_PDF_RECIPIENTS", "").strip()
+    recipients = parse_recipients(recipient_value)
     customer = metadata["customer"]
     load_date = metadata["load_date"]
     attachment_path = pdf_path.with_name(safe_attachment_name(document_kind, customer))

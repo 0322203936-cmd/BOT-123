@@ -47,6 +47,8 @@ jobs:
           MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
           WHOLESALE_PDF_ARTIFACT_DIR: artifacts/wholesale_email
           # Formato: Nombre|correo; otro nombre|otro-correo
-          # Si solo colocas un correo, el saludo se crea desde ese correo.
+          # Orden usa WHOLESALE_PDF_RECIPIENTS; Passing Sheet usa la variable
+          # separada y conserva compatibilidad con la anterior si falta.
           WHOLESALE_PDF_RECIPIENTS: ${{ vars.WHOLESALE_PDF_RECIPIENTS || 'Jesús|jesus.sandoval@cfbc.co' }}
+          WHOLESALE_PASSING_SHEET_RECIPIENTS: ${{ vars.WHOLESALE_PASSING_SHEET_RECIPIENTS || vars.WHOLESALE_PDF_RECIPIENTS || 'Jesús|jesus.sandoval@cfbc.co' }}
         run: python -u bot/send_wholesale_pdf_email.py
