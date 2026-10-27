@@ -89,7 +89,21 @@ def _clean_sharepoint_pdf(value: object) -> dict | None:
     name = name.strip()
     if not re.fullmatch(r"cajas-email-attachment-[0-9a-f-]{36}\.pdf", name, re.IGNORECASE):
         raise EmailConfigError("El nombre del PDF no es válido.")
-    return {"driveId": drive_id.strip(), "itemId": item_id.strip(), "name": name, "contentType": "application/pdf"}
+    original_name = value.get("originalName")
+    if isinstance(original_name, str):
+        original_name = Path(original_name.replace("\\", "/")).name
+        original_name = re.sub(r"[\x00-\x1f\x7f]", "_", original_name).strip()[:180]
+        if not original_name or not original_name.lower().endswith(".pdf"):
+            original_name = None
+    else:
+        original_name = None
+    return {
+        "driveId": drive_id.strip(),
+        "itemId": item_id.strip(),
+        "name": name,
+        **({"originalName": original_name} if original_name else {}),
+        "contentType": "application/pdf",
+    }
 
 
 def _clean_recipients(value: object, field: str) -> list[str]:
