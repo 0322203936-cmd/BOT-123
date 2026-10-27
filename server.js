@@ -523,7 +523,15 @@ async function uploadCajasLogo(buffer, contentType) {
   };
 }
 
-async function uploadCajasPdf(buffer, contentType) {
+function normalizeUploadedPdfName(value) {
+  let name = String(value || '').trim();
+  try { name = decodeURIComponent(name); } catch { /* keep the header value */ }
+  name = name.replace(/\\/g, '/').split('/').pop().replace(/[\r\n\x00-\x1f\x7f]/g, '_').trim();
+  if (!name || !/\.pdf$/i.test(name)) return 'documento.pdf';
+  return name.slice(0, 180);
+}
+
+async function uploadCajasPdf(buffer, contentType, originalName) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) {
     const error = new Error('Selecciona un PDF válido.'); error.status = 400; throw error;
   }
@@ -547,7 +555,7 @@ async function uploadCajasPdf(buffer, contentType) {
   if (!uploadResponse.ok) return sharePointError(uploadResponse, 'guardar el PDF');
   const uploaded = await uploadResponse.json();
   if (!uploaded.id) { const error = new Error('SharePoint guardó el PDF sin devolver su identificador.'); error.status = 502; throw error; }
-  return { driveId, itemId: uploaded.id, name: filename, contentType };
+  return { driveId, itemId: uploaded.id, name: filename, originalName: normalizeUploadedPdfName(originalName), contentType };
 }
 
 async function deleteCajasPdf(value) {
@@ -639,8 +647,9 @@ function normalizeCajasPdfSharePoint(value) {
   const driveId = typeof value.driveId === 'string' ? value.driveId.trim() : '';
   const itemId = typeof value.itemId === 'string' ? value.itemId.trim() : '';
   const name = typeof value.name === 'string' ? value.name.trim() : '';
+  const originalName = typeof value.originalName === 'string' ? normalizeUploadedPdfName(value.originalName) : '';
   if (!driveId || !itemId || !/^cajas-email-attachment-[0-9a-f-]{36}\.pdf$/i.test(name) || value.contentType !== 'application/pdf') { const error = new Error('La referencia del PDF en SharePoint está incompleta.'); error.status = 400; throw error; }
-  return { driveId, itemId, name, contentType: 'application/pdf' };
+  return { driveId, itemId, name, ...(originalName ? { originalName } : {}), contentType: 'application/pdf' };
 }
 
 function normalizeCajasEmailConfig(value) {
@@ -959,7 +968,7 @@ app.delete('/api/workflows/cajas/email-logo', requireWriteAuthentication, async 
 app.post('/api/workflows/cajas/email-pdf', requireWriteAuthentication, async (req, res, next) => {
   try {
     const contentType = (req.get('Content-Type') || '').split(';', 1)[0].trim().toLowerCase();
-    const pdfSharePoint = await uploadCajasPdf(req.body, contentType);
+    const pdfSharePoint = await uploadCajasPdf(req.body, contentType, req.get('X-Original-Filename'));
     return res.json({ pdfSharePoint });
   } catch (error) { return next(error); }
 });

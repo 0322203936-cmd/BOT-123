@@ -380,8 +380,14 @@ def _download_sharepoint_pdf(token: str, config: dict) -> Path | None:
         headers=graph_headers(token), timeout=120, stream=True,
     )
     _raise_for_graph(response, "descargar el PDF desde SharePoint")
-    temporary = tempfile.NamedTemporaryFile(prefix="cajas-email-", suffix=".pdf", delete=False)
-    temporary_path = Path(temporary.name)
+    original_name = str(pdf.get("originalName") or pdf.get("name") or "documento.pdf").strip()
+    original_name = Path(original_name.replace("\\", "/")).name
+    original_name = re.sub(r"[\x00-\x1f\x7f]", "_", original_name).strip()[:180]
+    if not original_name or not original_name.lower().endswith(".pdf"):
+        original_name = "documento.pdf"
+    temporary_dir = Path(tempfile.mkdtemp(prefix="cajas-email-"))
+    temporary_path = temporary_dir / original_name
+    temporary = temporary_path.open("wb")
     total = 0
     try:
         for chunk in response.iter_content(chunk_size=64 * 1024):
@@ -391,12 +397,20 @@ def _download_sharepoint_pdf(token: str, config: dict) -> Path | None:
             temporary.write(chunk)
         if not total: raise EmailConfigError("El PDF de SharePoint está vacío.")
     except Exception:
-        temporary.close(); temporary_path.unlink(missing_ok=True); raise
+        temporary.close(); temporary_path.unlink(missing_ok=True); temporary_dir.rmdir(); raise
     else:
         temporary.close()
         close_response = getattr(response, "close", None)
         if callable(close_response): close_response()
     return temporary_path
+
+
+def _cleanup_sharepoint_pdf(path: Path | None) -> None:
+    if not path:
+        return
+    path.unlink(missing_ok=True)
+    if path.parent.name.startswith("cajas-email-"):
+        path.parent.rmdir()
 
 
 def _user_path(sender: str, suffix: str) -> str:
@@ -597,8 +611,7 @@ def send_report_email(
     finally:
         if sharepoint_logo_path:
             sharepoint_logo_path.unlink(missing_ok=True)
-        if sharepoint_pdf_path:
-            sharepoint_pdf_path.unlink(missing_ok=True)
+        _cleanup_sharepoint_pdf(sharepoint_pdf_path)
 
 
 def send_mass_announcement_email(
@@ -640,5 +653,4 @@ def send_mass_announcement_email(
     finally:
         if sharepoint_logo_path:
             sharepoint_logo_path.unlink(missing_ok=True)
-        if sharepoint_pdf_path:
-            sharepoint_pdf_path.unlink(missing_ok=True)
+        _cleanup_sharepoint_pdf(sharepoint_pdf_path)
