@@ -50,6 +50,7 @@ interface CajasLogoReference {
   driveId: string;
   itemId: string;
   name: string;
+  originalName?: string;
   contentType: string;
 }
 
@@ -369,7 +370,17 @@ export class App implements OnInit, OnDestroy {
       const pdfFile = this.emailPdfFile;
       let pdfReference = this.emailPdfReference;
       if (pdfFile) {
-        const uploadResponse = await firstValueFrom(this.http.post<{ pdfSharePoint: CajasLogoReference }>('/api/workflows/cajas/email-pdf', pdfFile, { headers: { ...this.authHeaders(), 'Content-Type': 'application/pdf' } }));
+        const uploadResponse = await firstValueFrom(this.http.post<{ pdfSharePoint: CajasLogoReference }>(
+          '/api/workflows/cajas/email-pdf',
+          pdfFile,
+          {
+            headers: {
+              ...this.authHeaders(),
+              'Content-Type': 'application/pdf',
+              'X-Original-Filename': encodeURIComponent(pdfFile.name),
+            },
+          },
+        ));
         pdfReference = uploadResponse.pdfSharePoint;
         uploadedPdfReference = pdfReference;
       }
@@ -520,7 +531,7 @@ export class App implements OnInit, OnDestroy {
     this.emailLogoPreview = value.logoData || this.emailLegacyLogoUrl;
     this.emailPdfFile = null;
     this.emailPdfReference = value.pdfSharePoint;
-    this.emailPdfName = value.pdfSharePoint?.name || '';
+    this.emailPdfName = value.pdfSharePoint?.originalName || value.pdfSharePoint?.name || '';
     this.emailPdfCleared = false;
   }
 
