@@ -14,8 +14,8 @@ POSCO_URL = "http://3.132.9.174/Posco/"
 ARTIFACTS_DIR = Path("artifacts/exportar_6_meses")
 CAPTURES_DIR = ARTIFACTS_DIR / "capturas"
 REPORTS_DIR = ARTIFACTS_DIR / "reportes"
-EXPORT_START_DATE = date(2026, 7, 1)
-EXPORT_END_DATE = date(2026, 7, 31)
+EXPORT_START_DATE = date(2026, 8, 1)
+EXPORT_END_DATE = date(2026, 8, 31)
 
 
 def required_secret(name: str) -> str:
@@ -119,8 +119,8 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_july_2026(page: Page) -> tuple[date, date]:
-    """Filter POSCO orders from July 1 through July 31, 2026."""
+def set_load_date_august_2026(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from August 1 through August 31, 2026."""
     start_date = EXPORT_START_DATE
     end_date = EXPORT_END_DATE
     menor = find_date_input(page, "Load Date Menor")
@@ -142,7 +142,7 @@ def set_load_date_july_2026(page: Page) -> tuple[date, date]:
     mayor.press("Tab")
     print(
         f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={end_date.isoformat()} "
-        f"(julio de 2026).",
+        f"(agosto de 2026).",
         flush=True,
     )
     return start_date, end_date
@@ -221,8 +221,8 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Filtrando Load Date del 01/07/2026 al 31/07/2026...", flush=True)
-            start_date, end_date = set_load_date_july_2026(page)
+            print("Filtrando Load Date del 01/08/2026 al 31/08/2026...", flush=True)
+            start_date, end_date = set_load_date_august_2026(page)
             capture(page, "05_rango_enero_a_marzo_2026.png")
             click_search(page)
             try:
