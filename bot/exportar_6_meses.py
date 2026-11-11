@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import os
 import re
-import calendar
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
@@ -16,7 +14,8 @@ POSCO_URL = "http://3.132.9.174/Posco/"
 ARTIFACTS_DIR = Path("artifacts/exportar_6_meses")
 CAPTURES_DIR = ARTIFACTS_DIR / "capturas"
 REPORTS_DIR = ARTIFACTS_DIR / "reportes"
-BOT_TIMEZONE = ZoneInfo("America/Tijuana")
+EXPORT_START_DATE = date(2026, 1, 1)
+EXPORT_END_DATE = date(2026, 3, 31)
 
 
 def required_secret(name: str) -> str:
@@ -106,14 +105,6 @@ def select_active_status(page: Page) -> None:
     raise RuntimeError("No se encontró el filtro de estado con las opciones Todos y ACTIVO.")
 
 
-def add_calendar_months(value: date, months: int) -> date:
-    month_index = value.year * 12 + value.month - 1 + months
-    year, zero_based_month = divmod(month_index, 12)
-    month = zero_based_month + 1
-    day = min(value.day, calendar.monthrange(year, month)[1])
-    return date(year, month, day)
-
-
 def find_date_input(page: Page, label: str):
     group_input = page.locator(f'.input-group:has-text("{label}") input')
     if group_input.count() > 0:
@@ -128,11 +119,10 @@ def find_date_input(page: Page, label: str):
     raise RuntimeError(f"No se encontró el campo {label}.")
 
 
-def set_load_date_last_month_window(page: Page) -> tuple[date, date]:
-    """Filter POSCO orders from one calendar month ago through today."""
-    today = datetime.now(BOT_TIMEZONE).date()
-    end_date = today
-    start_date = add_calendar_months(end_date, -1)
+def set_load_date_first_quarter_2026(page: Page) -> tuple[date, date]:
+    """Filter POSCO orders from January 1 through March 31, 2026."""
+    start_date = EXPORT_START_DATE
+    end_date = EXPORT_END_DATE
     menor = find_date_input(page, "Load Date Menor")
     mayor = find_date_input(page, "Load Date Mayor")
     menor_input_type = (menor.get_attribute("type") or "text").lower()
@@ -152,7 +142,7 @@ def set_load_date_last_month_window(page: Page) -> tuple[date, date]:
     mayor.press("Tab")
     print(
         f"Load Date Menor={start_date.isoformat()}; Load Date Mayor={end_date.isoformat()} "
-        f"(desde un mes atrás hasta hoy).",
+        f"(primer trimestre de 2026).",
         flush=True,
     )
     return start_date, end_date
@@ -231,9 +221,9 @@ def run() -> None:
             page.wait_for_timeout(3_000)
             capture(page, "04_fechas_originales_posco.png")
 
-            print("Filtrando Load Date desde un mes atrás hasta hoy...", flush=True)
-            start_date, end_date = set_load_date_last_month_window(page)
-            capture(page, "05_rango_un_mes_atras_a_hoy.png")
+            print("Filtrando Load Date del 01/01/2026 al 31/03/2026...", flush=True)
+            start_date, end_date = set_load_date_first_quarter_2026(page)
+            capture(page, "05_rango_enero_a_marzo_2026.png")
             click_search(page)
             try:
                 page.wait_for_load_state("networkidle", timeout=60_000)
